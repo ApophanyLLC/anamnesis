@@ -14,7 +14,7 @@ import anamnesis.service as service_module
 from anamnesis.index import AnamnesisIndex
 from anamnesis.models import Exchange, SessionDocument, SourceAuthorization
 from anamnesis.service import AnamnesisService
-from anamnesis.registry import definition_for_source_type
+from anamnesis.registry import backlog_by_source_type, definition_for_source_type
 
 
 def _mode(path: Path) -> int:
@@ -652,6 +652,39 @@ def test_cloud_exports_use_manual_import_roots_not_home_history_paths(
     assert cloud_sources["gemini_export"].default_discovery_policy == "manual_import_only"
     assert cloud_sources["character_ai_export"].default_discovery_policy == "manual_import_only"
     assert cloud_sources["notion_export"].default_discovery_policy == "manual_import_only"
+
+
+def test_antigravity_raw_path_is_backlog_not_active_discovery(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    antigravity_raw = home / ".gemini" / "antigravity" / "conversations"
+    antigravity_raw.mkdir(parents=True)
+    (antigravity_raw / "session.json").write_text(
+        json.dumps(
+            {
+                "id": "antigravity-raw",
+                "messages": [{"role": "user", "content": "antigravity raw secret"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    service = AnamnesisService(workspace_root=tmp_path / "workspace", home=home)
+    active_sources = {source.source_type for source in service.discover()}
+    backlog_sources = backlog_by_source_type()
+
+    assert "gemini_antigravity" not in active_sources
+    assert (
+        backlog_sources["gemini_antigravity"].default_discovery_policy
+        == "docs_backlog_only"
+    )
+    assert service.index_authorized_sources() == {
+        "chunks": 0,
+        "documents": 0,
+        "sources": 0,
+    }
+    assert service.search("antigravity raw secret") == ()
 
 
 def test_encrypted_chatgpt_zip_is_skipped_with_diagnostics(

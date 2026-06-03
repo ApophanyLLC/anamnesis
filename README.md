@@ -55,8 +55,8 @@ offers CLI search over the resulting index.
 
 ## Current MVP
 
-- Discovers known product-owned local stores for Codex, Gemini Antigravity, and
-  VS Code Copilot/chat workspace storage.
+- Discovers known product-owned local stores for Codex and VS Code
+  Copilot/chat workspace storage.
 - Treats cloud/account-history products such as ChatGPT, Claude, Gemini,
   Character.AI, and Notion as manual import surfaces that must enter through
   explicit export files under `~/Anamnesis`.
@@ -71,6 +71,9 @@ offers CLI search over the resulting index.
 - Uses a governed source capability registry for source type, access mode,
   default discovery policy, accepted file shapes, risk level, parser owner,
   and a policy snapshot identifier for each definition.
+- Maintains source-access guidance in
+  `docs/source-access-matrix.md`, including export-first, cloud-export-only,
+  runtime-only, and docs-backlog source categories.
 - Traverses ChatGPT-style mapping exports by parent/child links when present.
 - Splits long text and Markdown source files into bounded chunks before FTS
   indexing.
@@ -170,12 +173,13 @@ narrow, product-owned local storage paths. Use `manual_import_only` for cloud
 exports and broad user-supplied content so authorization never implies scanning
 unrelated files.
 
-The registry also carries a non-active backlog for high-confidence local or
-direct-file candidates identified from the assistant storage matrix: LM Studio,
-Jan, Open WebUI, Codex CLI history, GitHub Copilot CLI, and GitHub Copilot in
-VS Code follow-ups. These records are governance seeds only. They are not part
-of default discovery until a source-specific parser, file eligibility rule, and
-safety test promote them into `SOURCE_CAPABILITY_REGISTRY`.
+The registry also carries a non-active backlog for local, export, and
+direct-file candidates identified from the source access matrix: Gemini
+Antigravity, LM Studio, Jan, Open WebUI, Codex CLI history, GitHub Copilot CLI,
+and GitHub Copilot in VS Code follow-ups. These records are governance seeds
+only. They are not part of default discovery until a source-specific parser,
+file eligibility rule, and safety test promote them into
+`SOURCE_CAPABILITY_REGISTRY`.
 
 Low-confidence products such as xAI Grok, Sai by Simular, Qwen, and consumer
 Poe are docs/backlog-only. They have no default discovery suffixes and should

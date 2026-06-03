@@ -84,23 +84,6 @@ SOURCE_CAPABILITY_REGISTRY: tuple[SourceDefinition, ...] = (
         notes="Local Codex session files when present.",
     ),
     SourceDefinition(
-        source_type="gemini_antigravity",
-        display_name="Gemini Antigravity",
-        default_path=Path("~/.gemini/antigravity/conversations"),
-        file_suffixes=(".json", ".jsonl", ".txt", ".md"),
-        access_method="local_files",
-        default_discovery_policy="auto_discover_local",
-        accepted_file_shapes=LOCAL_TEXT_SHAPES,
-        risk_level="medium",
-        parser_owner="parser_documents",
-        storage_model="local_transcript_files",
-        local_path_format="JSON, JSONL, Markdown, or text files under ~/.gemini/antigravity/conversations",
-        user_access_steps=LOCAL_DISCOVERY_STEPS,
-        confidence_level="medium",
-        drift_warning=LOCAL_SCHEMA_DRIFT,
-        notes="Local conversation files when present.",
-    ),
-    SourceDefinition(
         source_type="chatgpt_export",
         display_name="ChatGPT Export",
         default_path=Path("~/Anamnesis/chatgpt_exports"),
@@ -299,6 +282,30 @@ DEFAULT_SOURCE_DEFINITIONS = SOURCE_CAPABILITY_REGISTRY
 
 
 SOURCE_CAPABILITY_BACKLOG: tuple[SourceDefinition, ...] = (
+    SourceDefinition(
+        source_type="gemini_antigravity",
+        display_name="Gemini Antigravity",
+        default_path=Path("~/Anamnesis/imports/gemini_antigravity"),
+        file_suffixes=(),
+        access_method="unverified_local_or_export",
+        default_discovery_policy="docs_backlog_only",
+        accepted_file_shapes=UNVERIFIED_EXPORT_SHAPES,
+        risk_level="unknown",
+        parser_owner="unassigned",
+        storage_model="unverified_local_app_history",
+        local_path_format=(
+            "Official docs identify local app-data roots, but no stable "
+            "per-conversation file path or raw transcript format is active here."
+        ),
+        user_access_steps=UNVERIFIED_STEPS,
+        confidence_level="low",
+        drift_warning=UNVERIFIED_DRIFT,
+        notes=(
+            "Backlog candidate: do not auto-discover "
+            "~/.gemini/antigravity/conversations without product/version-specific "
+            "validation and safety tests."
+        ),
+    ),
     SourceDefinition(
         source_type="lm_studio",
         display_name="LM Studio",
