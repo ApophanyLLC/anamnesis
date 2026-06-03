@@ -157,6 +157,10 @@ disk wear-leveling, external sync tools, or already-copied database files.
 Encryption-at-rest remains the stronger design direction for highly sensitive
 archives.
 
+Public installation support is also a future packaging task. Add a
+`pyproject.toml` and console-script metadata before presenting this checkout as
+an installable Python package.
+
 Cloud assistant exports are not discovered from broad home-directory locations
 such as `~/Downloads` or hidden app-history folders. Place explicit exports in
 their Anamnesis import roots before authorizing them, for example an OpenAI ZIP

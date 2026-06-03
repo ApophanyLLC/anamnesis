@@ -147,6 +147,10 @@ Near-term hardening:
 - More source-specific tests for cloud export layouts and local tool formats.
 - Better diagnostics for skipped files, parse failures, and source policy drift.
 - Legacy authorization migration for manifests created before policy snapshots.
+- Packaging metadata, including `pyproject.toml` and console-script entry
+  points, when this snapshot is ready for public installation.
+- Encryption-at-rest for highly sensitive archives, rather than relying only on
+  file permissions, SQLite `secure_delete`, FTS rebuilds, and `VACUUM`.
 
 Search and retrieval:
 
@@ -189,7 +193,7 @@ False confidence in purge:
 
 SQLite and filesystem behavior can leave data in sidecars, backups, or copied
 files. Mitigation: FTS rebuild, `secure_delete`, `VACUUM`, restrictive file
-modes, privacy audit, and honest documentation.
+modes, privacy audit, honest documentation, and future encryption-at-rest.
 
 Compute cost:
 

@@ -75,7 +75,13 @@ class AnamnesisIndex:
         *,
         compact: bool = False,
     ) -> int:
-        """Atomically replace one source's active index after parsing succeeds."""
+        """Atomically replace one source's active index after parsing succeeds.
+
+        FTS is rebuilt whenever prior chunks are removed so deleted source text
+        is cleared from FTS shadow tables before the caller's later compaction.
+        Set ``compact`` only for direct callers that are not already batching a
+        single vacuum after multiple source replacements.
+        """
 
         self.initialize()
         indexed_chunks = 0
