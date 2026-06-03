@@ -74,6 +74,8 @@ offers CLI search over the resulting index.
 - Maintains source-access guidance in
   `docs/source-access-matrix.md`, including export-first, cloud-export-only,
   runtime-only, and docs-backlog source categories.
+- Maintains the current product narrative and roadmap boundaries in
+  `docs/product-brief.md`.
 - Traverses ChatGPT-style mapping exports by parent/child links when present.
 - Splits long text and Markdown source files into bounded chunks before FTS
   indexing.
