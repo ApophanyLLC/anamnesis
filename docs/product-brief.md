@@ -71,6 +71,12 @@ This snapshot does not yet provide vector search, local embeddings, synthesis,
 a web UI, an IDE extension, or team knowledge bases. Those remain roadmap
 concepts.
 
+It should be treated as experimental software. Users should assume YMMV for
+unsupported assistant formats, changing vendor exports, unusual local storage
+layouts, and highly sensitive archive workflows. The current repo is useful for
+local exploration and hardening work, but it is not yet a validated compliance,
+forensics, or secure preservation system.
+
 ## Privacy Model
 
 Anamnesis treats AI session history as highly sensitive local data. Session

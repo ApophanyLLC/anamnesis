@@ -53,6 +53,21 @@ session stores without reading content, records explicit user authorization for
 each source, indexes authorized sessions into a local SQLite database, and
 offers CLI search over the resulting index.
 
+## Experimental Use Notice
+
+This repository is an experimental source snapshot, not a hardened archival
+security product. Use it at your own risk, especially with legally privileged,
+regulated, personal, client, or otherwise sensitive archives.
+
+Anamnesis is designed to be conservative about discovery and authorization, but
+it still parses user-supplied files and stores searchable plaintext in local
+SQLite. Vendor export formats and local assistant storage layouts can drift
+without notice, and filesystem behavior, backups, sync tools, or copied
+database files can preserve data outside Anamnesis control. Review what you
+authorize, keep backups and workspace locations in mind, and do not treat the
+current MVP as a substitute for encryption-at-rest, formal incident response,
+or a validated e-discovery/preservation system.
+
 ## Current MVP
 
 - Discovers known product-owned local stores for Codex and VS Code

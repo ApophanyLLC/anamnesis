@@ -13,8 +13,14 @@ import pytest
 import anamnesis.service as service_module
 from anamnesis.index import AnamnesisIndex
 from anamnesis.models import Exchange, SessionDocument, SourceAuthorization
+from anamnesis.parser_common import MAX_TEXT_CHUNK_CHARS
 from anamnesis.service import AnamnesisService
-from anamnesis.registry import backlog_by_source_type, definition_for_source_type
+from anamnesis.registry import (
+    SOURCE_CAPABILITY_BACKLOG,
+    SOURCE_CAPABILITY_REGISTRY,
+    backlog_by_source_type,
+    definition_for_source_type,
+)
 
 
 def _mode(path: Path) -> int:
@@ -176,6 +182,56 @@ def test_replace_source_documents_rolls_back_on_insert_failure(
 
     assert len(index.search("old rollback durable")) == 1
     assert index.search("new rollback fragile") == ()
+
+
+def test_compact_source_replacement_vacuums_deleted_tokens_for_direct_callers(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "workspace" / "anamnesis.sqlite"
+    index = AnamnesisIndex(database_path)
+    source = SourceAuthorization(
+        source_id="codex:compact-source",
+        source_type="codex",
+        display_name="Codex",
+        path=tmp_path / "home" / ".codex" / "sessions",
+        authorized=True,
+    )
+    old_tokens = ("compactold", "compactghost", "compactremnant")
+    old_document = SessionDocument(
+        source_id=source.source_id,
+        source_type=source.source_type,
+        session_id="compact-session",
+        path=source.path / "session.json",
+        title="Compact Session",
+        created_at=None,
+        modified_at=None,
+        exchanges=(Exchange(role="user", text=" ".join(old_tokens)),),
+        metadata={},
+    )
+    new_document = SessionDocument(
+        source_id=source.source_id,
+        source_type=source.source_type,
+        session_id="compact-session",
+        path=source.path / "session.json",
+        title="Compact Session",
+        created_at=None,
+        modified_at=None,
+        exchanges=(Exchange(role="user", text="compactfresh token"),),
+        metadata={},
+    )
+
+    assert index.replace_source_documents(source, (old_document,), compact=True) == 1
+    raw_before = database_path.read_bytes()
+    for token in old_tokens:
+        assert token.encode("utf-8") in raw_before
+
+    assert index.replace_source_documents(source, (new_document,), compact=True) == 1
+
+    assert index.search("compactfresh token")[0].session_id == "compact-session"
+    assert index.search("compactold compactghost compactremnant") == ()
+    raw_after = database_path.read_bytes()
+    for token in old_tokens:
+        assert token.encode("utf-8") not in raw_after
 
 
 def test_index_reports_sqlite_write_error_without_aborting_run(
@@ -476,7 +532,7 @@ def test_privacy_audit_cli_outputs_json_without_creating_workspace(
             "privacy-audit",
         ],
         capture_output=True,
-        cwd=Path(__file__).resolve().parents[3],
+        cwd=Path(__file__).resolve().parents[2],
         text=True,
         check=False,
     )
@@ -581,6 +637,62 @@ def test_source_policy_snapshot_blocks_registry_drift(
     assert service.search("policy snapshot content") == ()
 
 
+def test_legacy_authorization_without_definition_id_still_indexes(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    source_root = home / ".codex" / "sessions"
+    source_root.mkdir(parents=True)
+    session_path = source_root / "session.json"
+    session_path.write_text(
+        json.dumps(
+            {
+                "id": "legacy-auth-session",
+                "messages": [{"role": "user", "content": "legacy authorization content"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    workspace = tmp_path / "workspace"
+    discovery_service = AnamnesisService(workspace_root=workspace, home=home)
+    codex = next(
+        source for source in discovery_service.discover() if source.source_type == "codex"
+    )
+    workspace.mkdir(parents=True)
+    (workspace / "sources.authorization.json").write_text(
+        json.dumps(
+            {
+                "sources": [
+                    {
+                        "source_id": codex.source_id,
+                        "source_type": "codex",
+                        "display_name": "Codex",
+                        "path": str(source_root),
+                        "authorized": True,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    service = AnamnesisService(workspace_root=workspace, home=home)
+
+    assert service.index_authorized_sources() == {"chunks": 1, "documents": 1, "sources": 1}
+    assert service.search("legacy authorization content")[0].session_id == (
+        "legacy-auth-session"
+    )
+
+
+def test_registry_definition_ids_are_unique_and_present() -> None:
+    definitions = (*SOURCE_CAPABILITY_REGISTRY, *SOURCE_CAPABILITY_BACKLOG)
+    definition_ids = [definition.definition_id for definition in definitions]
+
+    assert all(definition_ids)
+    assert len(definition_ids) == len(set(definition_ids))
+
+
 def test_chatgpt_export_does_not_scan_downloads(tmp_path: Path) -> None:
     home = tmp_path / "home"
     downloads = home / "Downloads"
@@ -623,6 +735,147 @@ def test_chatgpt_export_does_not_scan_downloads(tmp_path: Path) -> None:
     assert service.index_authorized_sources() == {"chunks": 1, "documents": 1, "sources": 1}
     assert len(service.search("dedicated export")) == 1
     assert service.search("downloads secret") == ()
+
+
+def test_chatgpt_export_ignores_non_conversation_json_files(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    export_root = home / "Anamnesis" / "chatgpt_exports"
+    export_root.mkdir(parents=True)
+    (export_root / "conversations.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "chatgpt-allowed",
+                    "messages": [{"role": "user", "content": "allowed export content"}],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (export_root / "unrelated.json").write_text(
+        json.dumps(
+            {
+                "id": "chatgpt-unrelated",
+                "messages": [{"role": "user", "content": "unrelated export secret"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    service = AnamnesisService(workspace_root=tmp_path / "workspace", home=home)
+    chatgpt = next(
+        source for source in service.discover() if source.source_type == "chatgpt_export"
+    )
+
+    assert chatgpt.file_count == 1
+
+    service.authorize(chatgpt.source_id)
+    assert service.index_authorized_sources() == {"chunks": 1, "documents": 1, "sources": 1}
+    assert len(service.search("allowed export content")) == 1
+    assert service.search("unrelated export secret") == ()
+
+
+def test_chatgpt_zip_indexes_only_conversations_member(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    export_root = home / "Anamnesis" / "chatgpt_exports"
+    export_root.mkdir(parents=True)
+    zip_path = export_root / "chatgpt-export.zip"
+    with zipfile.ZipFile(zip_path, "w") as archive:
+        archive.writestr(
+            "conversations.json",
+            json.dumps(
+                [
+                    {
+                        "id": "zip-allowed",
+                        "messages": [{"role": "user", "content": "zip allowed content"}],
+                    }
+                ]
+            ),
+        )
+        archive.writestr(
+            "account/unrelated.json",
+            json.dumps(
+                {
+                    "id": "zip-unrelated",
+                    "messages": [{"role": "user", "content": "zip unrelated secret"}],
+                }
+            ),
+        )
+
+    service = AnamnesisService(workspace_root=tmp_path / "workspace", home=home)
+    chatgpt = next(
+        source for source in service.discover() if source.source_type == "chatgpt_export"
+    )
+    service.authorize(chatgpt.source_id)
+
+    assert service.index_authorized_sources() == {"chunks": 1, "documents": 1, "sources": 1}
+    assert len(service.search("zip allowed content")) == 1
+    assert service.search("zip unrelated secret") == ()
+
+
+def test_chatgpt_mapping_export_orders_parent_child_messages(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    export_root = home / "Anamnesis" / "chatgpt_exports"
+    export_root.mkdir(parents=True)
+    (export_root / "conversations.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "mapping-chat",
+                    "title": "Mapping Chat",
+                    "mapping": {
+                        "root": {
+                            "id": "root",
+                            "parent": None,
+                            "children": ["first"],
+                            "message": None,
+                        },
+                        "second": {
+                            "id": "second",
+                            "parent": "first",
+                            "children": [],
+                            "message": {
+                                "author": {"role": "assistant"},
+                                "content": {"parts": ["second mapping text"]},
+                            },
+                        },
+                        "first": {
+                            "id": "first",
+                            "parent": "root",
+                            "children": ["second"],
+                            "message": {
+                                "author": {"role": "user"},
+                                "content": {"parts": ["first mapping text"]},
+                            },
+                        },
+                    },
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    workspace = tmp_path / "workspace"
+    service = AnamnesisService(workspace_root=workspace, home=home)
+    chatgpt = next(
+        source for source in service.discover() if source.source_type == "chatgpt_export"
+    )
+    service.authorize(chatgpt.source_id)
+
+    assert service.index_authorized_sources() == {"chunks": 2, "documents": 1, "sources": 1}
+    with sqlite3.connect(workspace / "anamnesis.sqlite") as connection:
+        rows = connection.execute(
+            "SELECT role, text FROM chunks ORDER BY chunk_id"
+        ).fetchall()
+
+    assert rows == [
+        ("user", "first mapping text"),
+        ("assistant", "second mapping text"),
+    ]
 
 
 def test_cloud_exports_use_manual_import_roots_not_home_history_paths(
@@ -837,6 +1090,67 @@ def test_same_stem_fallback_session_ids_do_not_collide(tmp_path: Path) -> None:
     assert alpha.session_id != beta.session_id
     assert alpha.session_id.startswith("session:")
     assert beta.session_id.startswith("session:")
+
+
+def test_long_text_source_is_split_into_bounded_chunks(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    source_root = home / ".codex" / "sessions"
+    source_root.mkdir(parents=True)
+    long_text = "alpha " + ("middle " * 900) + "omega"
+    (source_root / "long-session.txt").write_text(long_text, encoding="utf-8")
+
+    workspace = tmp_path / "workspace"
+    service = AnamnesisService(workspace_root=workspace, home=home)
+    codex = next(source for source in service.discover() if source.source_type == "codex")
+    service.authorize(codex.source_id)
+
+    counts = service.index_authorized_sources()
+    with sqlite3.connect(workspace / "anamnesis.sqlite") as connection:
+        chunk_texts = [
+            row[0]
+            for row in connection.execute(
+                "SELECT text FROM chunks ORDER BY chunk_id"
+            ).fetchall()
+        ]
+
+    assert counts == {"chunks": len(chunk_texts), "documents": 1, "sources": 1}
+    assert len(chunk_texts) > 1
+    assert all(len(text) <= MAX_TEXT_CHUNK_CHARS for text in chunk_texts)
+    assert "alpha" in chunk_texts[0]
+    assert "omega" in chunk_texts[-1]
+
+
+def test_jsonl_malformed_line_indexes_as_unknown_text(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    source_root = home / ".codex" / "sessions"
+    source_root.mkdir(parents=True)
+    (source_root / "mixed.jsonl").write_text(
+        "\n".join(
+            [
+                "malformed jsonl secret",
+                json.dumps({"role": "assistant", "content": "valid jsonl content"}),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    workspace = tmp_path / "workspace"
+    service = AnamnesisService(workspace_root=workspace, home=home)
+    codex = next(source for source in service.discover() if source.source_type == "codex")
+    service.authorize(codex.source_id)
+
+    assert service.index_authorized_sources() == {"chunks": 2, "documents": 1, "sources": 1}
+    assert len(service.search("malformed jsonl secret")) == 1
+    assert len(service.search("valid jsonl content")) == 1
+    with sqlite3.connect(workspace / "anamnesis.sqlite") as connection:
+        roles = [
+            row[0]
+            for row in connection.execute(
+                "SELECT role FROM chunks ORDER BY chunk_id"
+            ).fetchall()
+        ]
+
+    assert roles == ["unknown", "assistant"]
 
 
 def test_malformed_vscode_sqlite_is_skipped_with_diagnostics(tmp_path: Path) -> None:
