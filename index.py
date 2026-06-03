@@ -85,6 +85,8 @@ class AnamnesisIndex:
                 conn.execute("DELETE FROM chunks_fts WHERE rowid = ?", (chunk_id,))
             conn.execute("DELETE FROM chunks WHERE source_id = ?", (source.source_id,))
             conn.execute("DELETE FROM sessions WHERE source_id = ?", (source.source_id,))
+            if chunk_ids:
+                conn.execute("INSERT INTO chunks_fts(chunks_fts) VALUES ('rebuild')")
             self._upsert_source(conn, source)
             for document in documents:
                 self._insert_document(conn, document)

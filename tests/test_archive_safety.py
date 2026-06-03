@@ -36,11 +36,17 @@ def test_reindex_purges_deleted_source_files(tmp_path: Path) -> None:
     source_root = home / ".codex" / "sessions"
     source_root.mkdir(parents=True)
     session_path = source_root / "session.json"
+    deleted_tokens = ("vanishingtoken", "zzzremnant", "markerword")
     session_path.write_text(
         json.dumps(
             {
                 "id": "deleted-session",
-                "messages": [{"role": "user", "content": "stale ghost term"}],
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": " ".join(deleted_tokens),
+                    }
+                ],
             }
         ),
         encoding="utf-8",
@@ -51,16 +57,23 @@ def test_reindex_purges_deleted_source_files(tmp_path: Path) -> None:
     service.authorize(codex.source_id)
 
     assert service.index_authorized_sources() == {"chunks": 1, "documents": 1, "sources": 1}
+    database_path = tmp_path / "workspace" / "anamnesis.sqlite"
     with sqlite3.connect(tmp_path / "workspace" / "anamnesis.sqlite") as connection:
         assert connection.execute(
             "SELECT source_id, source_type, display_name, path FROM sources"
         ).fetchall() == [(codex.source_id, "codex", "Codex", str(source_root))]
-    assert len(service.search("stale ghost term")) == 1
+    assert len(service.search("vanishingtoken zzzremnant markerword")) == 1
+    raw_before = database_path.read_bytes()
+    for token in deleted_tokens:
+        assert token.encode("utf-8") in raw_before
 
     session_path.unlink()
 
     assert service.index_authorized_sources() == {"chunks": 0, "documents": 0, "sources": 1}
-    assert service.search("stale ghost term") == ()
+    assert service.search("vanishingtoken zzzremnant markerword") == ()
+    raw_after = database_path.read_bytes()
+    for token in deleted_tokens:
+        assert token.encode("utf-8") not in raw_after
 
 
 def test_reindex_keeps_old_active_index_on_unexpected_parse_failure(
