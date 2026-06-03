@@ -22,9 +22,20 @@ OPEN_WEBUI_SHAPES = (
     "open-webui-export-markdown",
     "open-webui-sqlite-db",
 )
+ANYTHINGLLM_SHAPES = (
+    "anythingllm-export-csv",
+    "anythingllm-export-json",
+    "anythingllm-export-jsonl",
+)
 CODEX_CLI_SHAPES = ("codex-history-jsonl", "codex-session-jsonl")
 COPILOT_CLI_SHAPES = ("copilot-cli-session-history",)
 VSCODE_CHAT_EXPORT_SHAPES = ("vscode-chat-export-json", "vscode-state-vscdb")
+WORKSPACE_ARTIFACT_SHAPES = (
+    "workspace-artifact-json",
+    "workspace-artifact-markdown",
+    "workspace-artifact-text",
+    "workspace-artifact-recording",
+)
 UNVERIFIED_EXPORT_SHAPES = ("unverified-export-shape",)
 
 EXPLICIT_EXPORT_STEPS = (
@@ -364,6 +375,26 @@ SOURCE_CAPABILITY_BACKLOG: tuple[SourceDefinition, ...] = (
         ),
     ),
     SourceDefinition(
+        source_type="anythingllm",
+        display_name="AnythingLLM",
+        default_path=Path("~/Anamnesis/imports/anythingllm"),
+        file_suffixes=(".csv", ".json", ".jsonl"),
+        access_method="user_supplied_export",
+        default_discovery_policy="manual_import_only",
+        accepted_file_shapes=ANYTHINGLLM_SHAPES,
+        risk_level="high",
+        parser_owner="parser_anythingllm_candidate",
+        storage_model="workspace_chat_log_export",
+        local_path_format="AnythingLLM workspace chat-log exports copied into ~/Anamnesis/imports/anythingllm",
+        user_access_steps=EXPLICIT_EXPORT_STEPS,
+        confidence_level="high",
+        drift_warning="AnythingLLM export formats and permission controls may change.",
+        notes=(
+            "Backlog candidate: prefer explicit workspace chat-log exports; "
+            "activation needs format-specific normalization and tests."
+        ),
+    ),
+    SourceDefinition(
         source_type="codex",
         display_name="Codex CLI History",
         default_path=Path("~/.codex/history.jsonl"),
@@ -421,6 +452,106 @@ SOURCE_CAPABILITY_BACKLOG: tuple[SourceDefinition, ...] = (
         notes=(
             "Backlog candidate: active SQLite workspace storage discovery exists; "
             "future work should add schema-specific adapters and exported-chat JSON support."
+        ),
+    ),
+    SourceDefinition(
+        source_type="meta_ai",
+        display_name="Meta AI",
+        default_path=Path("~/Anamnesis/imports/meta_ai"),
+        file_suffixes=(),
+        access_method="platform_account_export",
+        default_discovery_policy="docs_backlog_only",
+        accepted_file_shapes=UNVERIFIED_EXPORT_SHAPES,
+        risk_level="unknown",
+        parser_owner="unassigned",
+        storage_model="platform_message_or_account_export",
+        local_path_format="No dedicated Meta AI transcript path is verified; use broader Meta/Messenger export surfaces.",
+        user_access_steps=UNVERIFIED_STEPS,
+        confidence_level="low",
+        drift_warning=UNVERIFIED_DRIFT,
+        notes=(
+            "Docs-backlog candidate: Meta AI history may be embedded in broader "
+            "Meta product message/account exports rather than AI-only archives."
+        ),
+    ),
+    SourceDefinition(
+        source_type="perplexity",
+        display_name="Perplexity",
+        default_path=Path("~/Anamnesis/imports/perplexity"),
+        file_suffixes=(),
+        access_method="privacy_request_or_cloud_export",
+        default_discovery_policy="docs_backlog_only",
+        accepted_file_shapes=UNVERIFIED_EXPORT_SHAPES,
+        risk_level="unknown",
+        parser_owner="unassigned",
+        storage_model="cloud_account_history",
+        local_path_format="No verified local path or self-service bulk chat export schema",
+        user_access_steps=UNVERIFIED_STEPS,
+        confidence_level="low",
+        drift_warning=UNVERIFIED_DRIFT,
+        notes=(
+            "Docs-backlog candidate: privacy/access rights are documented, but "
+            "consumer bulk chat export was not verified."
+        ),
+    ),
+    SourceDefinition(
+        source_type="deepseek_chat",
+        display_name="DeepSeek Chat",
+        default_path=Path("~/Anamnesis/imports/deepseek"),
+        file_suffixes=(),
+        access_method="unverified_cloud_export",
+        default_discovery_policy="docs_backlog_only",
+        accepted_file_shapes=UNVERIFIED_EXPORT_SHAPES,
+        risk_level="unknown",
+        parser_owner="unassigned",
+        storage_model="cloud_account_history_or_client_state",
+        local_path_format="No verified local path or consumer bulk chat export schema",
+        user_access_steps=UNVERIFIED_STEPS,
+        confidence_level="low",
+        drift_warning=UNVERIFIED_DRIFT,
+        notes=(
+            "Docs-backlog candidate: API usage is client-state dependent, while "
+            "consumer chat export was not verified."
+        ),
+    ),
+    SourceDefinition(
+        source_type="mistral_le_chat",
+        display_name="Mistral Le Chat",
+        default_path=Path("~/Anamnesis/imports/mistral"),
+        file_suffixes=(),
+        access_method="cloud_or_conversation_export",
+        default_discovery_policy="docs_backlog_only",
+        accepted_file_shapes=UNVERIFIED_EXPORT_SHAPES,
+        risk_level="unknown",
+        parser_owner="unassigned",
+        storage_model="cloud_account_history_export",
+        local_path_format="No stable local transcript path is verified",
+        user_access_steps=UNVERIFIED_STEPS,
+        confidence_level="medium",
+        drift_warning=CLOUD_EXPORT_DRIFT,
+        notes=(
+            "Docs-backlog candidate: official docs describe Le Chat conversation "
+            "sharing/export controls, but no parser contract is active."
+        ),
+    ),
+    SourceDefinition(
+        source_type="lindy",
+        display_name="Lindy",
+        default_path=Path("~/Anamnesis/imports/lindy"),
+        file_suffixes=(".json", ".md", ".txt", ".csv"),
+        access_method="workspace_artifact_export",
+        default_discovery_policy="manual_import_only",
+        accepted_file_shapes=WORKSPACE_ARTIFACT_SHAPES,
+        risk_level="high",
+        parser_owner="parser_workspace_artifact_candidate",
+        storage_model="meeting_transcript_and_task_history_export",
+        local_path_format="Meeting transcripts, recordings, task history, or downloaded artifacts copied into ~/Anamnesis/imports/lindy",
+        user_access_steps=EXPLICIT_EXPORT_STEPS,
+        confidence_level="medium",
+        drift_warning="Workspace artifact formats and dashboard controls may change.",
+        notes=(
+            "Backlog candidate: preserve as workspace artifacts rather than "
+            "assuming a standalone assistant chat-log format."
         ),
     ),
     SourceDefinition(

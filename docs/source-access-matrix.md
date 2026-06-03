@@ -37,7 +37,8 @@ source-specific safety tests.
 | Export-first surfaces | Prefer explicit user exports over raw internal files. Raw parsing should be opt-in, narrow, and version-aware. | VS Code Copilot chat, LM Studio, Open WebUI, AnythingLLM. |
 | Cloud export only | Require files supplied by the user from account export or privacy dashboard flows. Do not scan broad home-directory locations. | ChatGPT, Claude web/Desktop, Gemini Apps, Microsoft Copilot. |
 | Runtime/client-dependent | Do not market the runtime itself as a conversation-history source. Import from the client that manages the chat history. | Ollama. |
-| Unverified or docs-backlog only | Keep as registry backlog until a primary-source path/export format and parser tests exist. | Gemini Antigravity raw files, Grok, Sai, Qwen, Poe. |
+| Workspace artifact export | Preserve exported pages, meeting transcripts, task history, recordings, or downloaded artifacts instead of assuming a standalone chat-log format. | Notion, Lindy. |
+| Unverified or docs-backlog only | Keep as registry backlog until a primary-source path/export format and parser tests exist. | Gemini Antigravity raw files, Grok, Sai, Qwen, Poe, Meta AI, Perplexity, DeepSeek Chat, Mistral Le Chat. |
 
 ## Current active policy
 
@@ -63,6 +64,17 @@ accepts conversation history as request messages, which means the authoritative
 history usually belongs to Open WebUI, LM Studio, AnythingLLM, Continue, or a
 custom client.
 
+Workspace assistants need a different mental model. Products such as Notion
+and Lindy may store useful AI session evidence as pages, meeting transcripts,
+task history, summaries, recordings, or downloaded workspace artifacts. Import
+pipelines should preserve those exported artifacts directly instead of forcing
+them into a chat-only source model too early.
+
+Retention and deletion statements are high-drift claims. They should be kept in
+operator docs or source-specific adapter docs only when re-verified against
+current vendor policy. The registry should encode safer ingestion posture first:
+manual import root, access mode, parser owner, risk level, and drift warning.
+
 ## Source notes
 
 | Product | Recommended access model | Anamnesis status |
@@ -78,9 +90,32 @@ custom client.
 | GitHub Copilot CLI | Candidate for local/session-state import once narrow filters and tests exist. | Backlog candidate. |
 | Microsoft Copilot | User-supplied privacy dashboard export. | Not active. |
 | LM Studio | Prefer UI chat exports such as Markdown, text, or PDF. | Backlog candidate. |
+| Jan | Candidate for local import from its local data folder and thread artifacts; activation needs current path and schema tests across platforms. | Backlog candidate. |
 | Open WebUI | Prefer Data Controls JSON export; copied database import must remain explicit. | Backlog candidate. |
-| AnythingLLM | Prefer workspace chat-log export. | Backlog gap. |
+| AnythingLLM | Prefer workspace chat-log export. | Backlog candidate. |
 | Ollama | Ask which client produced the conversations; import from that client. | Runtime only. |
+| Character.AI | User-supplied account export. | Active manual import root. |
+| Notion AI | Preserve exported pages, databases, meeting notes, or workspace exports rather than AI-only transcript assumptions. | Active manual import root. |
+| Meta AI | Treat as broader Meta/Messenger account-data export until a dedicated AI transcript export is verified. | Docs-backlog only. |
+| Perplexity | Treat as cloud account history or privacy/access request unless a bulk chat export is verified. | Docs-backlog only. |
+| DeepSeek Chat | Treat consumer chat as cloud history and API usage as client-state dependent. | Docs-backlog only. |
+| Mistral Le Chat | Treat as cloud conversation export/share until a stable archive schema is verified. | Docs-backlog only. |
+| Lindy | Preserve meeting transcripts, recordings, task history, and downloaded workspace artifacts. | Backlog candidate. |
+| Grok, Sai, Qwen, Poe | Keep docs-backlog only until a primary-source bulk export, API export, or stable local path is verified. | Docs-backlog only. |
+
+## Format coverage implications
+
+Anamnesis should expect at least these input families:
+
+- ZIP or account archives from cloud products.
+- JSON and JSONL from local tools, account exports, and chat-log exports.
+- SQLite from explicit database copies or conservative local adapters.
+- Markdown, HTML, text, PDF, and CSV from workspace and local-tool exports.
+- Media files or transcript-plus-recording bundles from meeting/workflow tools.
+
+This does not mean every format should be active immediately. It means the
+normalization layer should avoid assumptions that every source is a sequence of
+role/content chat turns.
 
 ## Useful current references
 
@@ -93,3 +128,11 @@ custom client.
 - Open WebUI import/export: <https://docs.openwebui.com/features/chat-conversations/data-controls/import-export/>
 - AnythingLLM docs home: <https://docs.useanything.com/>
 - LM Studio 0.4.0 chat export note: <https://lmstudio.ai/blog/0.4.0/>
+- Character.AI export: <https://support.character.ai/hc/en-us/articles/30299431702555-How-do-I-export-all-my-data-How-can-I-export-my-chats>
+- Jan data folder: <https://jan.ai/docs/data-folder>
+- Notion export: <https://www.notion.com/help/export-your-content>
+- Lindy meeting notes: <https://docs.lindy.ai/features/meeting-assistant/meeting-notes>
+- Mistral Le Chat: <https://docs.mistral.ai/le-chat>
+- Mistral privacy controls: <https://docs.mistral.ai/admin/security-access/privacy>
+- DeepSeek API docs: <https://api-docs.deepseek.com/>
+- Perplexity privacy and security: <https://docs.perplexity.ai/docs/resources/privacy-security>

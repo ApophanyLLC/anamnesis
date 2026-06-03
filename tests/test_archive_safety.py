@@ -687,6 +687,36 @@ def test_antigravity_raw_path_is_backlog_not_active_discovery(
     assert service.search("antigravity raw secret") == ()
 
 
+def test_second_matrix_sources_are_backlog_only(tmp_path: Path) -> None:
+    service = AnamnesisService(
+        workspace_root=tmp_path / "workspace",
+        home=tmp_path / "home",
+    )
+    active_sources = {source.source_type for source in service.discover()}
+    backlog_sources = backlog_by_source_type()
+    expected_backlog = {
+        "anythingllm",
+        "deepseek_chat",
+        "lindy",
+        "meta_ai",
+        "mistral_le_chat",
+        "perplexity",
+    }
+
+    assert active_sources.isdisjoint(expected_backlog)
+    assert expected_backlog <= set(backlog_sources)
+    for source_type in expected_backlog - {"anythingllm", "lindy"}:
+        assert (
+            backlog_sources[source_type].default_discovery_policy
+            == "docs_backlog_only"
+        )
+    assert (
+        backlog_sources["anythingllm"].default_discovery_policy
+        == "manual_import_only"
+    )
+    assert backlog_sources["lindy"].default_discovery_policy == "manual_import_only"
+
+
 def test_encrypted_chatgpt_zip_is_skipped_with_diagnostics(
     tmp_path: Path, monkeypatch
 ) -> None:
