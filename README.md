@@ -99,10 +99,8 @@ or a validated e-discovery/preservation system.
 
 ## CLI
 
-This checkout is a non-installable source snapshot: there is no
-`pyproject.toml` in the tree, so it is not packaged as a wheel or sdist.
-Work from the checkout's parent directory, or add that parent to
-`PYTHONPATH`, and use the module entrypoint directly:
+This checkout is an installable standalone package. From the checkout root, use
+the module entrypoint directly or install the package in editable mode:
 
 ```bash
 python -m anamnesis discover
@@ -114,11 +112,11 @@ python -m anamnesis search "auth architecture decision"
 python -m anamnesis revoke "<source_id>"
 ```
 
-For a standalone exported snapshot that contains a top-level `anamnesis/`
-package, run commands from the snapshot root with that root on `PYTHONPATH`:
+After installation, the console script is also available:
 
 ```bash
-PYTHONPATH=. python -m anamnesis discover
+python -m pip install -e .
+anamnesis discover
 ```
 
 Use `--workspace <path>` to choose a different Anamnesis data directory. The
@@ -128,21 +126,8 @@ Use `--home <path>` to point discovery at a test or alternate home directory.
 
 ## Tests
 
-In this repository, Anamnesis carries package-local safety tests so maintainers
-can verify the privacy boundary without the full repository test tree:
-
-```bash
-python -m pytest tests
-```
-
-For a standalone exported snapshot whose tests are shipped under
-`anamnesis/tests`, use the snapshot layout instead:
-
-```bash
-PYTHONPATH=. python -m pytest anamnesis/tests
-```
-
-From the full repository, the broader app regression suite is:
+Anamnesis carries package-local safety and MVP tests so maintainers can verify
+the privacy boundary without the catsup repository test tree:
 
 ```bash
 python -m pytest tests
@@ -172,9 +157,9 @@ disk wear-leveling, external sync tools, or already-copied database files.
 Encryption-at-rest remains the stronger design direction for highly sensitive
 archives.
 
-Public installation support is also a future packaging task. Add a
-`pyproject.toml` and console-script metadata before presenting this checkout as
-an installable Python package.
+Public installation support is experimental and local-first; this package is
+intended to be consumed from the private Apophany source repository during the
+current cutover.
 
 Cloud assistant exports are not discovered from broad home-directory locations
 such as `~/Downloads` or hidden app-history folders. Place explicit exports in
