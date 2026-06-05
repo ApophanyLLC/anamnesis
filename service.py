@@ -84,6 +84,7 @@ class AnamnesisService:
         source_error_diagnostics: list[dict[str, str]] = []
         source_definitions_by_type = definitions_by_source_type()
         source_definitions_by_id = definitions_by_definition_id()
+        discovered_sources_by_id = {source.source_id: source for source in self.discover()}
         existing_statuses_by_id = {
             status.source_id: status for status in self.index.source_statuses()
         }
@@ -91,10 +92,12 @@ class AnamnesisService:
         for authorization in self.authorization_store.authorized_sources():
             counts["sources"] += 1
             now_iso = _now_utc_iso()
+            discovered_source = discovered_sources_by_id.get(authorization.source_id)
             source_definition = source_definitions_by_type.get(
                 authorization.source_type
             )
             source_error_summary = self._empty_error_summary()
+            source_sync_warnings: list[str] = []
             if source_definition is None:
                 reason = f"unknown_source_definition: {authorization.source_type}"
                 source_error_diagnostics.append(
@@ -117,6 +120,7 @@ class AnamnesisService:
                     source_error_summary=source_error_summary,
                     statuses_by_id=existing_statuses_by_id,
                     ignored_files_due_to_policy_restriction=0,
+                    sync_warnings=source_sync_warnings,
                 )
                 continue
 
@@ -162,6 +166,7 @@ class AnamnesisService:
                             source_error_summary=source_error_summary,
                             statuses_by_id=existing_statuses_by_id,
                             ignored_files_due_to_policy_restriction=0,
+                            sync_warnings=source_sync_warnings,
                         )
                         continue
                     if registered_definition.definition_id != source_definition.definition_id:
@@ -188,6 +193,7 @@ class AnamnesisService:
                             source_error_summary=source_error_summary,
                             statuses_by_id=existing_statuses_by_id,
                             ignored_files_due_to_policy_restriction=0,
+                            sync_warnings=source_sync_warnings,
                         )
                         continue
                 effective_file_suffixes = self._suffixes_from_snapshot(
@@ -214,6 +220,7 @@ class AnamnesisService:
                     source_error_summary=source_error_summary,
                     statuses_by_id=existing_statuses_by_id,
                     ignored_files_due_to_policy_restriction=0,
+                    sync_warnings=source_sync_warnings,
                 )
                 continue
 
@@ -226,6 +233,7 @@ class AnamnesisService:
             source_parser_mode = "structured"
             source_drift_detected = False
             source_last_status = "success"
+            parsed_file_count = 0
             for path in source_files:
                 try:
                     parsed_file = parse_session_file(
@@ -272,12 +280,35 @@ class AnamnesisService:
                     )
                     break
                 if parsed_file.parser_mode == "raw_text":
-                    source_parser_mode = "raw_text"
+                    source_parser_mode = "fallback_text"
+                parsed_file_count += len(parsed_file.documents)
                 if parsed_file.drift_detected:
                     source_last_status = "drift_error"
                     source_drift_detected = True
                     break
                 source_documents.extend(parsed_file.documents)
+            source_last_modified_at = (
+                discovered_source.last_modified_at if discovered_source else None
+            )
+            existing_status = existing_statuses_by_id.get(authorization.source_id)
+            existing_last_indexed_at = (
+                _parse_indexed_at(existing_status.last_indexed_at)
+                if existing_status is not None
+                else None
+            )
+            if (
+                source_last_modified_at is not None
+                and existing_last_indexed_at is not None
+                and (source_last_modified_at - existing_last_indexed_at).total_seconds()
+                > 24 * 60 * 60
+                and parsed_file_count == 0
+            ):
+                source_sync_warnings.append(
+                    (
+                        f"Source '{authorization.source_id}' has been modified on disk "
+                        "but 0 documents were parsed"
+                    )
+                )
             if source_last_status in {"drift_error", "parse_error"}:
                 now_iso = _now_utc_iso()
                 effective_mode = (
@@ -295,6 +326,7 @@ class AnamnesisService:
                         ignored_files_due_to_policy_restriction=(
                             ignored_files_due_to_policy_restriction
                         ),
+                        sync_warnings=source_sync_warnings,
                     )
                 except sqlite3.Error as exc:
                     source_error_summary = self._increment_error_summary(
@@ -319,6 +351,7 @@ class AnamnesisService:
                         ignored_files_due_to_policy_restriction=(
                             ignored_files_due_to_policy_restriction
                         ),
+                        sync_warnings=source_sync_warnings,
                     )
                 continue
             documents_tuple = tuple(source_documents)
@@ -336,6 +369,7 @@ class AnamnesisService:
                     error_count=self._sum_error_summary(source_error_summary),
                     error_summary=source_error_summary,
                     last_indexed_at=now_iso,
+                    sync_warnings=source_sync_warnings,
                 )
             except sqlite3.Error as exc:
                 source_last_status = "parse_error"
@@ -358,6 +392,7 @@ class AnamnesisService:
                     source_error_summary=source_error_summary,
                     statuses_by_id=existing_statuses_by_id,
                     ignored_files_due_to_policy_restriction=ignored_files_due_to_policy_restriction,
+                    sync_warnings=source_sync_warnings,
                 )
                 continue
             counts["documents"] += len(documents_tuple)
@@ -371,6 +406,7 @@ class AnamnesisService:
                 source_error_summary=source_error_summary,
                 statuses_by_id=existing_statuses_by_id,
                 ignored_files_due_to_policy_restriction=ignored_files_due_to_policy_restriction,
+                sync_warnings=source_sync_warnings,
             )
             needs_compaction = True
         if needs_compaction:
@@ -412,6 +448,7 @@ class AnamnesisService:
         source_error_summary: dict[str, int],
         statuses_by_id: dict[str, SourceIndexStatus],
         ignored_files_due_to_policy_restriction: int,
+        sync_warnings: list[str] | None = None,
     ) -> None:
         existing_status = statuses_by_id.get(authorization.source_id)
         prior_summary = (
@@ -429,6 +466,7 @@ class AnamnesisService:
             ),
             error_count=prior_count + self._sum_error_summary(source_error_summary),
             error_summary=merged_summary,
+            sync_warnings=sync_warnings,
             last_indexed_at=now_iso,
         )
 
@@ -456,7 +494,7 @@ class AnamnesisService:
             policy_snapshot = {}
             if status is not None:
                 last_status = status.last_index_status or "not_indexed"
-                parser_mode = status.parser_mode or "unknown"
+                parser_mode = _normalize_parser_mode(status.parser_mode)
                 drift_detected = status.drift_detected
                 last_indexed_at = status.last_indexed_at
                 ignored_files_due_to_policy_restriction = (
@@ -480,10 +518,13 @@ class AnamnesisService:
                     "last_indexed_at": last_indexed_at,
                     "status": last_status,
                     "parser_mode": parser_mode,
+                    "parser_mode_label": _parser_mode_label(parser_mode),
+                    "parser_mode_chunking_tooltip": _parser_mode_chunking_tooltip(parser_mode),
                     "drift_detected": drift_detected,
                     "ignored_files_due_to_policy_restriction": ignored_files_due_to_policy_restriction,
                     "error_count": status.error_count if status else 0,
                     "error_summary": status.error_summary if status else {},
+                    "sync_warnings": status.sync_warnings if status else [],
                     "policy_id": policy_id,
                     "policy_mode": policy_mode,
                     "policy_snapshot": policy_snapshot,
@@ -499,6 +540,7 @@ class AnamnesisService:
         }
         issues: list[dict[str, str]] = []
         ignored_files_due_to_policy_restriction = 0
+        sync_warning_count = 0
         for source in self.authorization_store.authorized_sources():
             status = statuses_by_id.get(source.source_id)
             if status is None:
@@ -509,6 +551,15 @@ class AnamnesisService:
                     }
                 )
                 continue
+            if status.sync_warnings:
+                sync_warning_count += len(status.sync_warnings)
+                issues.append(
+                    {
+                        "source_id": source.source_id,
+                        "reason": "sync_warning",
+                        "warnings": "; ".join(status.sync_warnings),
+                    }
+                )
             if status.ignored_files_due_to_policy_restriction:
                 ignored_files_due_to_policy_restriction += (
                     status.ignored_files_due_to_policy_restriction
@@ -562,7 +613,7 @@ class AnamnesisService:
                     }
                 )
                 continue
-            if status.parser_mode == "raw_text":
+            if _normalize_parser_mode(status.parser_mode) == "fallback_text":
                 issues.append(
                     {
                         "source_id": source.source_id,
@@ -573,6 +624,7 @@ class AnamnesisService:
             "issues": issues,
             "has_issues": bool(issues),
             "ignored_files_due_to_policy_restriction": ignored_files_due_to_policy_restriction,
+            "sync_warning_count": sync_warning_count,
         }
 
     def search(self, query: str, *, limit: int = 10) -> tuple[SearchResult, ...]:
@@ -598,6 +650,7 @@ class AnamnesisService:
                     "parser_mode": item["parser_mode"],
                     "drift_detected": item["drift_detected"],
                     "ignored_files_due_to_policy_restriction": item["ignored_files_due_to_policy_restriction"],
+                    "sync_warnings": item["sync_warnings"],
                     "error_summary": source_row_error_summary,
                     "error_count": item["error_count"],
                 }
@@ -816,3 +869,24 @@ def _parse_indexed_at(value: str | None) -> datetime | None:
         return parsed
     except ValueError:
         return None
+
+
+def _normalize_parser_mode(parser_mode: str | None) -> str:
+    return "fallback_text" if parser_mode == "raw_text" else (parser_mode or "unknown")
+
+
+def _parser_mode_label(parser_mode: str) -> str:
+    if parser_mode == "fallback_text":
+        return "Raw Text Source"
+    if parser_mode == "failed":
+        return "Failed to Parse"
+    return "Structured Chat"
+
+
+def _parser_mode_chunking_tooltip(parser_mode: str) -> str:
+    if parser_mode == "fallback_text":
+        return (
+            "Text chunks use 4000-character windows with 250-character overlap to preserve "
+            "adjacent context."
+        )
+    return "Structured parser preserves message boundaries and metadata."

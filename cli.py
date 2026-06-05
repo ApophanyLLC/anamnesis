@@ -14,6 +14,7 @@ from typing import Any
 from . import __version__
 from .index import AnamnesisSearchError
 from .models import (
+    SearchResult,
     SourceAuthorization,
     policy_id_for_snapshot,
     policy_snapshot_for_definition,
@@ -34,6 +35,40 @@ def _json_default(value: object) -> object:
 
 def _print_json(payload: Any, *, file: Any = None) -> None:
     print(json.dumps(payload, default=_json_default, indent=2, sort_keys=True), file=file)
+
+
+def _enrich_search_results(
+    results: tuple[SearchResult, ...],
+    *,
+    source_status_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    source_status_by_id = {
+        source_row["source_id"]: source_row for source_row in source_status_rows
+    }
+    enriched: list[dict[str, Any]] = []
+    for result in results:
+        source_status = source_status_by_id.get(result.source_id)
+        parser_mode = source_status.get("parser_mode") if source_status else "unknown"
+        parser_mode_label = (
+            source_status.get("parser_mode_label")
+            if source_status
+            else "Structured Chat"
+        )
+        chunking_tooltip = (
+            source_status.get("parser_mode_chunking_tooltip")
+            if source_status
+            else "Structured parser preserves message boundaries and metadata."
+        )
+        enriched.append(
+            {
+                **asdict(result),
+                "parser_mode": parser_mode,
+                "source_mode_label": parser_mode_label,
+                "chunking_tooltip": chunking_tooltip,
+                "title_with_mode": f"[{parser_mode_label}] {result.title}",
+            }
+        )
+    return enriched
 
 
 def _serialize_policy_value(value: object) -> list[str]:
@@ -296,9 +331,19 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "search":
             results = service.search(args.query, limit=args.limit)
+            status_payload = service.status()
+            enriched_results = _enrich_search_results(
+                results,
+                source_status_rows=status_payload["sources"],
+            )
             health = service.sync_health()
             if args.verbose:
-                _print_json({"results": results, "index_health": health})
+                _print_json(
+                    {
+                        "results": enriched_results,
+                        "index_health": health,
+                    }
+                )
             else:
                 if health["has_issues"]:
                     issue_count = len(health["issues"])
@@ -307,7 +352,7 @@ def main(argv: list[str] | None = None) -> int:
                         f"{'s' if issue_count != 1 else ''} went silent. "
                         "Run 'anamnesis status' for details."
                     )
-                _print_json({"results": results})
+                _print_json({"results": enriched_results})
             return 0
 
         if args.command == "status":

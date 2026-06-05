@@ -148,6 +148,15 @@ For scripted runs, use:
 Run `anamnesis status` or `anamnesis search --verbose` to inspect policy-mode
 status and any `ignored_files_due_to_policy_restriction` counters.
 
+Search output now includes parser-mode labels per result:
+
+- `Structured Chat` for structured parser mode
+- `Raw Text Source` when parsing fell back to raw text
+
+When source indexing is stale or impaired, `search` prints a one-line sync notice
+and `status` exposes source-level `sync_warnings` with date-skew or parse-staleness
+signals (for example: "Source 'copilot_vscode' has been modified on disk but 0 documents were parsed").
+
 Policy diffs and approvals are recorded in `CHANGELOG.md`.
 
 After installation, the console script is also available:

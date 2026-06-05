@@ -127,6 +127,7 @@ class SourceIndexStatus:
     ignored_files_due_to_policy_restriction: int = 0
     error_count: int = 0
     error_summary: dict[str, int] = field(default_factory=dict)
+    sync_warnings: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

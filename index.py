@@ -37,7 +37,8 @@ class AnamnesisIndex:
                     parser_mode TEXT,
                     ignored_files_due_to_policy_restriction INTEGER NOT NULL DEFAULT 0,
                     error_count INTEGER NOT NULL DEFAULT 0,
-                    error_summary_json TEXT NOT NULL DEFAULT '{}'
+                    error_summary_json TEXT NOT NULL DEFAULT '{}',
+                    sync_warnings_json TEXT NOT NULL DEFAULT '[]'
                 );
                 CREATE TABLE IF NOT EXISTS sessions (
                     session_id TEXT NOT NULL,
@@ -100,6 +101,7 @@ class AnamnesisIndex:
         ignored_files_due_to_policy_restriction: int = 0,
         error_count: int = 0,
         error_summary: dict[str, int] | None = None,
+        sync_warnings: list[str] | None = None,
         last_indexed_at: str | None = None,
     ) -> int:
         """Atomically replace one source's active index after parsing succeeds.
@@ -129,6 +131,7 @@ class AnamnesisIndex:
                 ignored_files_due_to_policy_restriction=ignored_files_due_to_policy_restriction,
                 error_count=error_count,
                 error_summary=error_summary,
+                sync_warnings=sync_warnings,
                 last_indexed_at=last_indexed_at,
             )
             for document in documents:
@@ -155,6 +158,7 @@ class AnamnesisIndex:
         ignored_files_due_to_policy_restriction: int = 0,
         error_count: int = 0,
         error_summary: dict[str, int] | None = None,
+        sync_warnings: list[str] | None = None,
         last_indexed_at: str | None = None,
     ) -> None:
         self.initialize()
@@ -168,6 +172,7 @@ class AnamnesisIndex:
                 ignored_files_due_to_policy_restriction=ignored_files_due_to_policy_restriction,
                 error_count=error_count,
                 error_summary=error_summary,
+                sync_warnings=sync_warnings,
                 last_indexed_at=last_indexed_at,
             )
 
@@ -187,7 +192,8 @@ class AnamnesisIndex:
                     parser_mode,
                     ignored_files_due_to_policy_restriction,
                     error_count,
-                    error_summary_json
+                    error_summary_json,
+                    sync_warnings_json
                 FROM sources
                 ORDER BY source_id
                 """
@@ -205,6 +211,7 @@ class AnamnesisIndex:
                 ignored_files_due_to_policy_restriction=int(row[8] or 0),
                 error_count=int(row[9] or 0),
                 error_summary=self._safe_error_summary(row[10]),
+                sync_warnings=self._safe_warning_list(row[11]),
             )
             for row in rows
         )
@@ -287,6 +294,17 @@ class AnamnesisIndex:
             for key, value in loaded.items()
             if isinstance(value, int) or (isinstance(value, str) and value.isdigit())
         }
+
+    def _safe_warning_list(self, raw_warnings: object) -> list[str]:
+        if not isinstance(raw_warnings, str):
+            return []
+        try:
+            loaded = json.loads(raw_warnings)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(loaded, list):
+            return []
+        return [str(value) for value in loaded if str(value)]
 
     def secure_delete_enabled(self) -> bool:
         if not self.path.exists():
@@ -383,9 +401,11 @@ class AnamnesisIndex:
         ignored_files_due_to_policy_restriction: int = 0,
         error_count: int = 0,
         error_summary: dict[str, int] | None = None,
+        sync_warnings: list[str] | None = None,
         last_indexed_at: str | None = None,
     ) -> None:
         summary_json = json.dumps(error_summary or {})
+        sync_warnings_json = json.dumps(list(sync_warnings or []))
         conn.execute(
             """
             INSERT OR REPLACE INTO sources (
@@ -393,8 +413,9 @@ class AnamnesisIndex:
                 last_index_status, drift_detected, parser_mode,
                 ignored_files_due_to_policy_restriction,
                 error_count,
-                error_summary_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                error_summary_json,
+                sync_warnings_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 source.source_id,
@@ -408,6 +429,7 @@ class AnamnesisIndex:
                 ignored_files_due_to_policy_restriction,
                 error_count,
                 summary_json,
+                sync_warnings_json,
             ),
         )
 
@@ -439,6 +461,10 @@ class AnamnesisIndex:
         if "error_summary_json" not in existing_columns:
             conn.execute(
                 "ALTER TABLE sources ADD COLUMN error_summary_json TEXT NOT NULL DEFAULT '{}'"
+            )
+        if "sync_warnings_json" not in existing_columns:
+            conn.execute(
+                "ALTER TABLE sources ADD COLUMN sync_warnings_json TEXT NOT NULL DEFAULT '[]'"
             )
 
 

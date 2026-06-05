@@ -1,5 +1,17 @@
 # Anamnesis Changelog
 
+## 2026-06-05
+
+- Added sync-time index health surfacing for schema drift-induced staleness:
+  source-level warnings are persisted when disk content changed but indexing
+  produces zero parsed documents within a >24h window.
+- Added fallback parser visibility so search and status show `fallback_text` when
+  plain-text parsing is used, with chunking context (`4000`-char windows with
+  `250`-char overlap) included for transparent ranking expectations.
+- Added `sync_warnings` tracking to source status records so search emits a one-line
+  notice when sources are stale or impaired and keeps the warning in local
+  diagnostics (`status`, `debug-report`, `privacy-audit --generate-report`).
+
 ## 2026-06-04
 
 - Implemented policy snapshot persistence in `sources.authorization.json` so source re-authorization compares concrete policy fields instead of only hash IDs.
