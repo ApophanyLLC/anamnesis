@@ -20,6 +20,13 @@
   snapshots. Parsing is now routed through adapter owners (`parser_documents`,
   `parser_copilot`) and documents can degrade to raw-text fallback mode when
   structured schema drift is detected, while preserving search/index continuity.
+- Added adapter-hardening foundations for scale:
+  - defined the canonical session schema for adapter outputs in
+    `session_schema.py` and parser docs,
+  - added streaming parsing for large JSON/ZIP exports in `parser_documents`
+    to avoid loading entire multi-GB payloads before normalization,
+  - added runtime adapter extension points via `ANAMNESIS_ADAPTER_MODULES` so
+    vendor format support can be introduced as external modules.
 
 ## 2026-06-04
 

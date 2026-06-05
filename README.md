@@ -307,6 +307,8 @@ Adapter authors can add new vendor format support through the adapter contract i
 [`docs/parser-adapters.md`](docs/parser-adapters.md), which defines the internal
 normalized session shape and required parser owner/version behavior.
 
-Large JSON and ZIP members are still loaded as whole members before
-normalization. Very large ChatGPT exports should move to a streaming parser
-before this surface is treated as a high-volume archival importer.
+Large JSON and ZIP members use streaming parsing for top-level JSON arrays so
+large vendor exports can be indexed without loading full archives into memory.
+Adapter authors can add parser modules to `ANAMNESIS_ADAPTER_MODULES` without
+editing the core parser registry, and all adapters should emit the canonical
+session shape in `docs/parser-adapters.md`.

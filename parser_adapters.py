@@ -7,6 +7,8 @@ documents and treating any adapter failure as structured-to-text fallback.
 
 from __future__ import annotations
 
+import importlib
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -108,10 +110,33 @@ _KNOWN_ADAPTERS: tuple[ParserAdapter, ...] = (
 )
 
 
+def _load_external_adapters() -> tuple[ParserAdapter, ...]:
+    module_names = tuple(
+        name.strip() for name in os.environ.get("ANAMNESIS_ADAPTER_MODULES", "").split(",")
+    )
+    if not module_names:
+        return ()
+
+    adapters: list[ParserAdapter] = []
+    for module_name in module_names:
+        if not module_name:
+            continue
+        module = importlib.import_module(module_name)
+        getter = getattr(module, "get_adapters", None)
+        if callable(getter):
+            loaded = getter()
+        else:
+            continue
+        for adapter in loaded:
+            if isinstance(adapter, ParserAdapter):
+                adapters.append(adapter)
+    return tuple(adapters)
+
+
 def adapters() -> tuple[ParserAdapter, ...]:
     """Return the registered parser adapters."""
 
-    return _KNOWN_ADAPTERS
+    return _KNOWN_ADAPTERS + _load_external_adapters()
 
 
 def adapter_owner(owner: str) -> ParserAdapter:
@@ -122,18 +147,16 @@ def adapter_owner(owner: str) -> ParserAdapter:
 
 def _build_adapter_index() -> dict[str, ParserAdapter]:
     registry: dict[str, ParserAdapter] = {}
-    for adapter in _KNOWN_ADAPTERS:
+    for adapter in adapters():
         registry[adapter.owner] = adapter
     return registry
-
-
-_ADAPTERS = _build_adapter_index()
 
 
 def get_adapter(parser_owner: str) -> ParserAdapter:
     """Resolve an adapter for a parser owner with a safe fallback."""
 
-    return _ADAPTERS.get(parser_owner) or _ADAPTERS["unassigned"]
+    adapters_by_owner = _build_adapter_index()
+    return adapters_by_owner.get(parser_owner) or adapters_by_owner["unassigned"]
 
 
 __all__ = [

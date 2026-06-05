@@ -24,21 +24,31 @@ vendor-specific parsing to adapters.
 
 The core indexer consumes this stable form:
 
-- `session_id` (`str`)
-- `source_id` (`str`)
-- `source_type` (`str`)
-- `title` (`str`)
-- `created_at` (`ISO-8601` or `None`)
-- `modified_at` (`ISO-8601` or `None`)
-- `exchanges` (`tuple[Exchange, ...]`)
-- `metadata` (`dict[str, Any]`)
+```json
+{
+  "session_id": "string",
+  "source_id": "string",
+  "source_type": "string",
+  "title": "string",
+  "created_at": "ISO-8601 or null",
+  "modified_at": "ISO-8601 or null",
+  "exchanges": [
+    {
+      "timestamp": "ISO-8601 or null",
+      "role": "user|assistant|...",
+      "content": "string"
+    }
+  ],
+  "metadata": {}
+}
+```
 
 `Exchange` entries are normalized with:
 - `role` (`str`)
-- `text` (`str`)
+- `text` (`str`, also surfaced as `content` in the canonical schema)
 - `created_at` (`ISO-8601` or `None`)
 
-Core parsing and indexing should assume this contract and should not encode vendor
+Core parsing and indexing assumes this contract and should not encode vendor
 table names, JSON field names, or transport-specific assumptions directly.
 
 ## Parser owner / adapter contract
@@ -61,6 +71,30 @@ Each adapter module must provide:
 If an adapter raises a `SessionParseError` with reason starting with
 `"schema_drift:"`, core dispatch falls back to `fallback_parse` when configured.
 
+## External adapter loading
+
+External adapters can be loaded by setting `ANAMNESIS_ADAPTER_MODULES` to a
+comma-separated list of importable modules. Each module must expose
+`get_adapters() -> tuple[ParserAdapter, ...]`.
+
+```python
+from anamnesis.parser_adapters import ParserAdapter
+
+
+def parse_vendor_file(path: Path, *, source_id: str, source_type: str):
+    ...
+
+
+def get_adapters() -> tuple[ParserAdapter, ...]:
+    return (
+        ParserAdapter(
+            owner="parser_vendor_x",
+            version="vendor-x/v1",
+            parse=parse_vendor_file,
+        ),
+    )
+```
+
 ## Adding a new vendor adapter
 
 1. Add a new adapter implementation in `parser_adapters.py` (or import it from a
@@ -76,6 +110,9 @@ If an adapter raises a `SessionParseError` with reason starting with
    behavior and policies are in place.
 4. Document migration notes in `CHANGELOG.md` when adapter behavior or supported
    formats changes.
+
+Community adapters should remain in dedicated modules/packages and avoid edits to
+core parser modules unless required by a regression.
 
 ## Suggested contributor workflow
 
