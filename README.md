@@ -131,6 +131,23 @@ The command prints an anonymized summary with source status, parser posture, cou
 of indexed rows, and cumulative error counters that can be pasted into a GitHub issue
 or discussion.
 
+`discover` now includes a focused onboarding block:
+
+- `manual_import_paths`: paths for manual-export sources (Cloud products only).
+- `first_run_tour`: a copy-ready step list that explains how to populate import
+  directories.
+
+Use this guidance for the current manual-export-only flow:
+
+```bash
+python -m anamnesis discover
+python -m anamnesis authorize "<source_id>"
+python -m anamnesis index
+```
+
+See [`docs/manual-export-guidance.md`](docs/manual-export-guidance.md) for the
+current setup model and manual import workflow notes.
+
 When a source policy changes, `authorize` prints a terminal diff and requires
 explicit user choice with a safe default that cancels on Enter:
 

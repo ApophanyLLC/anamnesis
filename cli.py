@@ -23,6 +23,36 @@ from .service import AnamnesisService
 from .registry import definitions_by_source_type
 
 
+
+_MANUAL_EXPORT_ASSISTANCE = {
+    "claude": (
+        "Claude: open your export/download page and export chat data",
+        "Place exported JSON files in the configured import path.",
+        "Keep the export in the exported folder until indexing succeeds.",
+    ),
+    "chatgpt_export": (
+        "ChatGPT: open Settings → Data Controls → Export data (JSON/ZIP).",
+        "Keep the exported ZIP or conversations.json under the import path.",
+        "Anamnesis reads only OpenAI export payloads from that folder.",
+    ),
+    "gemini_export": (
+        "Google Gemini: generate a conversation or account export from your account settings.",
+        "Place the exported ZIP or JSON files in the configured import path.",
+        "Keep the archive at the configured import path until indexing is complete.",
+    ),
+    "character_ai_export": (
+        "Character.AI: request your data export from account settings.",
+        "Copy the exported JSON file into the configured import path.",
+        "Do not run indexing before authorization.",
+    ),
+    "notion_export": (
+        "Notion: export relevant workspace pages or workspace exports.",
+        "Drop JSON, Markdown, or workspace export files into the configured import path.",
+        "Choose an export format that preserves conversation-relevant text.",
+    ),
+}
+
+
 def _json_default(value: object) -> object:
     if isinstance(value, Path):
         return str(value)
@@ -35,6 +65,51 @@ def _json_default(value: object) -> object:
 
 def _print_json(payload: Any, *, file: Any = None) -> None:
     print(json.dumps(payload, default=_json_default, indent=2, sort_keys=True), file=file)
+
+
+def _manual_import_entry(source: Any) -> dict[str, Any]:
+    instructions = list(source.user_access_steps)
+    for hint in _MANUAL_EXPORT_ASSISTANCE.get(source.source_type, ()):
+        if hint not in instructions:
+            instructions.append(hint)
+    return {
+        "source_type": source.source_type,
+        "display_name": source.display_name,
+        "path": str(source.path),
+        "path_notes": source.local_path_format,
+        "instructions": instructions,
+        "accepted_file_shapes": source.accepted_file_shapes,
+    }
+
+
+def _build_discover_tour(sources: tuple[Any, ...]) -> dict[str, Any]:
+    manual_import_sources = [
+        source
+        for source in sources
+        if source.default_discovery_policy == "manual_import_only"
+    ]
+    manual_import_paths = [
+        _manual_import_entry(source)
+        for source in manual_import_sources
+        if source.path is not None
+    ]
+    has_authorized_source = False
+    for source in sources:
+        if source.authorized:
+            has_authorized_source = True
+            break
+    tutorial = [
+        "Cloud products are manual-only in this release.",
+        "For each source below, run: copy exports into path -> authorize -> index.",
+        "When exports are ready, run `anamnesis authorize <source_id>` for each source.",
+        "After authorization, run `anamnesis index` to ingest content.",
+    ]
+    if has_authorized_source:
+        tutorial = tutorial[1:]
+    return {
+        "manual_import_paths": manual_import_paths,
+        "first_run_tour": tutorial,
+    }
 
 
 def _enrich_search_results(
@@ -295,7 +370,13 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.command == "discover":
-            _print_json({"sources": service.discover()})
+            sources = service.discover()
+            _print_json(
+                {
+                    "sources": sources,
+                    **_build_discover_tour(sources),
+                }
+            )
             return 0
 
         if args.command == "authorize":
