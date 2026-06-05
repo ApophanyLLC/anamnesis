@@ -8,7 +8,7 @@ import re
 import sqlite3
 
 from .filesystem import ensure_private_directory, ensure_private_file
-from .models import SearchResult, SessionDocument, SourceAuthorization
+from .models import SearchResult, SessionDocument, SourceAuthorization, SourceIndexStatus
 
 
 class AnamnesisSearchError(ValueError):
@@ -30,7 +30,11 @@ class AnamnesisIndex:
                     source_id TEXT PRIMARY KEY,
                     source_type TEXT NOT NULL,
                     display_name TEXT NOT NULL,
-                    path TEXT NOT NULL
+                    path TEXT NOT NULL,
+                    last_indexed_at TEXT,
+                    last_index_status TEXT,
+                    drift_detected INTEGER NOT NULL DEFAULT 0,
+                    parser_mode TEXT
                 );
                 CREATE TABLE IF NOT EXISTS sessions (
                     session_id TEXT NOT NULL,
@@ -57,6 +61,7 @@ class AnamnesisIndex:
                 USING fts5(text, content='chunks', content_rowid='chunk_id');
                 """
             )
+            self._ensure_sources_columns(conn)
         ensure_private_file(self.path)
 
     def upsert_documents(self, documents: tuple[SessionDocument, ...]) -> int:
@@ -74,6 +79,10 @@ class AnamnesisIndex:
         documents: tuple[SessionDocument, ...],
         *,
         compact: bool = False,
+        last_index_status: str = "success",
+        drift_detected: bool = False,
+        parser_mode: str = "structured",
+        last_indexed_at: str | None = None,
     ) -> int:
         """Atomically replace one source's active index after parsing succeeds.
 
@@ -93,7 +102,14 @@ class AnamnesisIndex:
             conn.execute("DELETE FROM sessions WHERE source_id = ?", (source.source_id,))
             if chunk_ids:
                 conn.execute("INSERT INTO chunks_fts(chunks_fts) VALUES ('rebuild')")
-            self._upsert_source(conn, source)
+            self._upsert_source(
+                conn,
+                source,
+                last_index_status=last_index_status,
+                drift_detected=drift_detected,
+                parser_mode=parser_mode,
+                last_indexed_at=last_indexed_at,
+            )
             for document in documents:
                 self._insert_document(conn, document)
                 indexed_chunks += sum(
@@ -107,6 +123,58 @@ class AnamnesisIndex:
         self.initialize()
         with self._connect() as conn:
             self._upsert_source(conn, source)
+
+    def update_source_status(
+        self,
+        source: SourceAuthorization,
+        *,
+        last_index_status: str,
+        drift_detected: bool,
+        parser_mode: str,
+        last_indexed_at: str | None = None,
+    ) -> None:
+        self.initialize()
+        with self._connect() as conn:
+            self._upsert_source(
+                conn,
+                source,
+                last_index_status=last_index_status,
+                drift_detected=drift_detected,
+                parser_mode=parser_mode,
+                last_indexed_at=last_indexed_at,
+            )
+
+    def source_statuses(self) -> tuple[SourceIndexStatus, ...]:
+        self.initialize()
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    source_id,
+                    source_type,
+                    display_name,
+                    path,
+                    last_indexed_at,
+                    last_index_status,
+                    drift_detected,
+                    parser_mode
+                FROM sources
+                ORDER BY source_id
+                """
+            ).fetchall()
+        return tuple(
+            SourceIndexStatus(
+                source_id=str(row[0]),
+                source_type=str(row[1]),
+                display_name=str(row[2]),
+                path=str(row[3]),
+                last_indexed_at=row[4] if row[4] is not None else None,
+                last_index_status=row[5] if row[5] is not None else None,
+                drift_detected=bool(row[6]),
+                parser_mode=row[7] if row[7] is not None else None,
+            )
+            for row in rows
+        )
 
     def purge_source(self, source_id: str) -> int:
         self.initialize()
@@ -257,21 +325,48 @@ class AnamnesisIndex:
             )
 
     def _upsert_source(
-        self, conn: sqlite3.Connection, source: SourceAuthorization
+        self,
+        conn: sqlite3.Connection,
+        source: SourceAuthorization,
+        *,
+        last_index_status: str | None = None,
+        drift_detected: bool = False,
+        parser_mode: str | None = None,
+        last_indexed_at: str | None = None,
     ) -> None:
         conn.execute(
             """
             INSERT OR REPLACE INTO sources (
-                source_id, source_type, display_name, path
-            ) VALUES (?, ?, ?, ?)
+                source_id, source_type, display_name, path, last_indexed_at,
+                last_index_status, drift_detected, parser_mode
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 source.source_id,
                 source.source_type,
                 source.display_name,
                 str(source.path),
+                last_indexed_at,
+                last_index_status,
+                1 if drift_detected else 0,
+                parser_mode,
             ),
         )
+
+    def _ensure_sources_columns(self, conn: sqlite3.Connection) -> None:
+        existing_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(sources)").fetchall()
+        }
+        if "last_indexed_at" not in existing_columns:
+            conn.execute("ALTER TABLE sources ADD COLUMN last_indexed_at TEXT")
+        if "last_index_status" not in existing_columns:
+            conn.execute("ALTER TABLE sources ADD COLUMN last_index_status TEXT")
+        if "drift_detected" not in existing_columns:
+            conn.execute(
+                "ALTER TABLE sources ADD COLUMN drift_detected INTEGER NOT NULL DEFAULT 0"
+            )
+        if "parser_mode" not in existing_columns:
+            conn.execute("ALTER TABLE sources ADD COLUMN parser_mode TEXT")
 
 
 def _build_safe_fts_query(query: str) -> str:

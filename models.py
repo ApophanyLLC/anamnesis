@@ -76,6 +76,15 @@ class SourceAuthorization:
 
 
 @dataclass(frozen=True)
+class ParsedSessionFile:
+    """Result payload for one parser run."""
+
+    documents: tuple[SessionDocument, ...]
+    parser_mode: str
+    drift_detected: bool = False
+
+
+@dataclass(frozen=True)
 class Exchange:
     """A normalized exchange chunk extracted from a session."""
 
@@ -97,6 +106,20 @@ class SessionDocument:
     modified_at: str | None
     exchanges: tuple[Exchange, ...]
     metadata: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class SourceIndexStatus:
+    """Index manifest row for one known source."""
+
+    source_id: str
+    source_type: str
+    display_name: str
+    path: str
+    last_indexed_at: str | None
+    last_index_status: str | None
+    drift_detected: bool
+    parser_mode: str | None
 
 
 @dataclass(frozen=True)

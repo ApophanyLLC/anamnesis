@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import zipfile
 
-from .models import Exchange, SessionDocument
+from .models import Exchange, ParsedSessionFile, SessionDocument
 from .parser_common import (
     build_document,
     coerce_datetime_text,
@@ -24,8 +24,9 @@ def parse_zip_export(
     *,
     source_id: str,
     source_type: str,
-) -> tuple[SessionDocument, ...]:
+) -> ParsedSessionFile:
     documents: list[SessionDocument] = []
+    parser_mode = "structured"
     try:
         with zipfile.ZipFile(path) as archive:
             for name in sorted(archive.namelist()):
@@ -38,22 +39,24 @@ def parse_zip_export(
                     payload = json.loads(raw)
                 except json.JSONDecodeError:
                     continue
-                documents.extend(
-                    documents_from_payload(
-                        payload,
+                parsed_documents = documents_from_payload(
+                    payload,
+                    source_id=source_id,
+                    source_type=source_type,
+                    path=path,
+                    fallback_session_id=fallback_session_id_for(
+                        path,
                         source_id=source_id,
-                        source_type=source_type,
-                        path=path,
-                        fallback_session_id=fallback_session_id_for(
-                            path,
-                            source_id=source_id,
-                            suffix=name,
-                        ),
-                    )
+                        suffix=name,
+                    ),
                 )
+                if parsed_documents:
+                    documents.extend(parsed_documents)
+                    if any(not document.metadata for document in parsed_documents):
+                        parser_mode = "raw_text"
     except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
         raise SessionParseError(path, f"zip_error: {exc}") from exc
-    return tuple(documents)
+    return ParsedSessionFile(tuple(documents), parser_mode=parser_mode)
 
 
 def parse_json_document(
@@ -61,7 +64,7 @@ def parse_json_document(
     *,
     source_id: str,
     source_type: str,
-) -> tuple[SessionDocument, ...]:
+) -> ParsedSessionFile:
     payload = json.loads(path.read_text(encoding="utf-8"))
     documents = documents_from_payload(
         payload,
@@ -71,8 +74,14 @@ def parse_json_document(
         fallback_session_id=fallback_session_id_for(path, source_id=source_id),
     )
     if documents:
-        return documents
-    return (fallback_document(path, source_id=source_id, source_type=source_type),)
+        parser_mode = "structured"
+        if any(not document.metadata for document in documents):
+            parser_mode = "raw_text"
+        return ParsedSessionFile(tuple(documents), parser_mode=parser_mode)
+    return ParsedSessionFile(
+        (fallback_document(path, source_id=source_id, source_type=source_type),),
+        parser_mode="raw_text",
+    )
 
 
 def parse_jsonl_document(
@@ -80,7 +89,7 @@ def parse_jsonl_document(
     *,
     source_id: str,
     source_type: str,
-) -> SessionDocument:
+) -> ParsedSessionFile:
     exchanges: list[Exchange] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
@@ -100,15 +109,20 @@ def parse_jsonl_document(
                     created_at=coerce_datetime_text(payload),
                 )
             )
-    return build_document(
-        path,
-        source_id=source_id,
-        source_type=source_type,
-        session_id=fallback_session_id_for(path, source_id=source_id),
-        title=path.stem,
-        created_at=None,
-        exchanges=tuple(exchanges),
-        metadata={},
+    return ParsedSessionFile(
+        (
+            build_document(
+                path,
+                source_id=source_id,
+                source_type=source_type,
+                session_id=fallback_session_id_for(path, source_id=source_id),
+                title=path.stem,
+                created_at=None,
+                exchanges=tuple(exchanges),
+                metadata={},
+            ),
+        ),
+        parser_mode="raw_text",
     )
 
 
@@ -117,14 +131,19 @@ def parse_text_document(
     *,
     source_id: str,
     source_type: str,
-) -> SessionDocument:
-    return build_document(
-        path,
-        source_id=source_id,
-        source_type=source_type,
-        session_id=fallback_session_id_for(path, source_id=source_id),
-        title=path.stem,
-        created_at=None,
-        exchanges=text_document_exchanges(path.read_text(encoding="utf-8")),
-        metadata={},
+) -> ParsedSessionFile:
+    return ParsedSessionFile(
+        (
+            build_document(
+                path,
+                source_id=source_id,
+                source_type=source_type,
+                session_id=fallback_session_id_for(path, source_id=source_id),
+                title=path.stem,
+                created_at=None,
+                exchanges=text_document_exchanges(path.read_text(encoding="utf-8")),
+                metadata={},
+            ),
+        ),
+        parser_mode="raw_text",
     )

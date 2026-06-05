@@ -106,9 +106,11 @@ the module entrypoint directly or install the package in editable mode:
 python -m anamnesis discover
 python -m anamnesis authorize "<source_id>"
 python -m anamnesis index
+python -m anamnesis status
 python -m anamnesis privacy-audit
 python -m anamnesis privacy-audit --fix-permissions
 python -m anamnesis search "auth architecture decision"
+python -m anamnesis search "auth architecture decision" --verbose
 python -m anamnesis revoke "<source_id>"
 ```
 

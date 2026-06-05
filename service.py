@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
 from typing import Any
@@ -93,18 +94,25 @@ class AnamnesisService:
                 source_type=authorization.source_type,
             )
             source_documents = []
-            source_failed = False
+            source_parser_mode = "structured"
+            source_drift_detected = False
+            source_last_status = "success"
             for path in source_files:
                 try:
-                    documents = parse_session_file(
+                    parsed_file = parse_session_file(
                         path,
                         source_id=authorization.source_id,
                         source_type=authorization.source_type,
                     )
                 except SessionParseError as exc:
+                    if exc.reason.startswith("schema_drift:"):
+                        source_last_status = "drift_error"
+                        source_drift_detected = True
                     skipped_file_diagnostics.append(
                         {"path": str(exc.path), "reason": exc.reason}
                     )
+                    if source_last_status == "drift_error":
+                        break
                     continue
                 except (OSError, UnicodeDecodeError, ValueError) as exc:
                     skipped_file_diagnostics.append(
@@ -112,6 +120,7 @@ class AnamnesisService:
                     )
                     continue
                 except Exception as exc:
+                    source_last_status = "parse_error"
                     source_error_diagnostics.append(
                         {
                             "source_id": authorization.source_id,
@@ -119,15 +128,46 @@ class AnamnesisService:
                             "reason": f"unexpected_parse_error: {type(exc).__name__}",
                         }
                     )
-                    source_failed = True
                     break
-                source_documents.extend(documents)
-            if source_failed:
+                if parsed_file.parser_mode == "raw_text":
+                    source_parser_mode = "raw_text"
+                if parsed_file.drift_detected:
+                    source_last_status = "drift_error"
+                    source_drift_detected = True
+                    break
+                source_documents.extend(parsed_file.documents)
+            if source_last_status in {"drift_error", "parse_error"}:
+                now_iso = _now_utc_iso()
+                effective_mode = (
+                    "failed" if source_last_status != "success" else source_parser_mode
+                )
+                try:
+                    self.index.update_source_status(
+                        authorization,
+                        last_index_status=source_last_status,
+                        drift_detected=source_drift_detected,
+                        parser_mode=effective_mode,
+                        last_indexed_at=now_iso,
+                    )
+                except sqlite3.Error as exc:
+                    source_error_diagnostics.append(
+                        {
+                            "source_id": authorization.source_id,
+                            "path": str(authorization.path),
+                            "reason": f"index_write_error: {type(exc).__name__}: {exc}",
+                        }
+                    )
                 continue
             documents_tuple = tuple(source_documents)
+            now_iso = _now_utc_iso()
             try:
                 replaced_chunks = self.index.replace_source_documents(
-                    authorization, documents_tuple
+                    authorization,
+                    documents_tuple,
+                    last_index_status=source_last_status,
+                    drift_detected=source_drift_detected,
+                    parser_mode=source_parser_mode,
+                    last_indexed_at=now_iso,
                 )
             except sqlite3.Error as exc:
                 source_error_diagnostics.append(
@@ -150,6 +190,109 @@ class AnamnesisService:
             counts["source_errors"] = len(source_error_diagnostics)
             counts["source_error_diagnostics"] = source_error_diagnostics
         return counts
+
+    def status(self) -> dict[str, Any]:
+        statuses_by_id = {
+            status.source_id: status
+            for status in self.index.source_statuses()
+        }
+        discovered_sources = self.discover()
+        source_rows: list[dict[str, Any]] = []
+        for discovered in discovered_sources:
+            status = statuses_by_id.get(discovered.source_id)
+            last_status = "not_indexed"
+            parser_mode = "n/a"
+            drift_detected = False
+            last_indexed_at = None
+            if status is not None:
+                last_status = status.last_index_status or "not_indexed"
+                parser_mode = status.parser_mode or "unknown"
+                drift_detected = status.drift_detected
+                last_indexed_at = status.last_indexed_at
+            if not discovered.authorized:
+                last_status = "not_authorized"
+                parser_mode = parser_mode if status else "n/a"
+            source_rows.append(
+                {
+                    "source_id": discovered.source_id,
+                    "source_type": discovered.source_type,
+                    "display_name": discovered.display_name,
+                    "path": str(discovered.path),
+                    "authorized": discovered.authorized,
+                    "last_indexed_at": last_indexed_at,
+                    "status": last_status,
+                    "parser_mode": parser_mode,
+                    "drift_detected": drift_detected,
+                }
+            )
+        return {"sources": source_rows}
+
+    def sync_health(self, *, stale_after_days: int = 30) -> dict[str, Any]:
+        thresholds = datetime.now(timezone.utc) - timedelta(days=stale_after_days)
+        statuses_by_id = {
+            status.source_id: status
+            for status in self.index.source_statuses()
+        }
+        issues: list[dict[str, str]] = []
+        for source in self.authorization_store.authorized_sources():
+            status = statuses_by_id.get(source.source_id)
+            if status is None:
+                issues.append(
+                    {
+                        "source_id": source.source_id,
+                        "reason": "not_indexed",
+                    }
+                )
+                continue
+            if status.last_index_status == "drift_error":
+                issues.append(
+                    {
+                        "source_id": source.source_id,
+                        "reason": "drift_error",
+                    }
+                )
+                continue
+            if status.last_index_status == "parse_error":
+                issues.append(
+                    {
+                        "source_id": source.source_id,
+                        "reason": "parse_error",
+                    }
+                )
+                continue
+            if status.drift_detected:
+                issues.append(
+                    {
+                        "source_id": source.source_id,
+                        "reason": "drift_detected",
+                    }
+                )
+                continue
+            parsed_last_indexed_at = _parse_indexed_at(status.last_indexed_at)
+            if not status.last_indexed_at or parsed_last_indexed_at is None:
+                issues.append(
+                    {
+                        "source_id": source.source_id,
+                        "reason": "not_recent",
+                    }
+                )
+                continue
+            if parsed_last_indexed_at < thresholds:
+                issues.append(
+                    {
+                        "source_id": source.source_id,
+                        "reason": "not_recent",
+                    }
+                )
+                continue
+            if status.parser_mode == "raw_text":
+                issues.append(
+                    {
+                        "source_id": source.source_id,
+                        "reason": "raw_text_fallback",
+                    }
+                )
+        return {"issues": issues, "has_issues": bool(issues)}
 
     def search(self, query: str, *, limit: int = 10) -> tuple[SearchResult, ...]:
         return self.index.search(query, limit=limit)
@@ -278,3 +421,19 @@ class AnamnesisService:
                 "actual_mode": format_mode(actual_mode),
             }
         )
+
+
+def _now_utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_indexed_at(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    except ValueError:
+        return None

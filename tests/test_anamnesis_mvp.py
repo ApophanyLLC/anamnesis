@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import sqlite3
 import json
 from pathlib import Path
@@ -771,3 +772,46 @@ def test_anamnesis_vscode_copilot_sqlite_filters_to_chat_scoped_records(
     assert "copilot_blob_schema" in blob_results[0].title
 
     assert service.search("extension secret", limit=5) == ()
+
+
+def test_anamnesis_status_and_sync_health_surface_staleness(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    source_root = home / ".codex" / "sessions"
+    source_root.mkdir(parents=True)
+    session_path = source_root / "session.json"
+    session_path.write_text(
+        json.dumps(
+            {
+                "id": "auth-session",
+                "messages": [{"role": "user", "content": "status smoke test content"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    service = AnamnesisService(workspace_root=tmp_path / "workspace", home=home)
+    codex = next(source for source in service.discover() if source.source_type == "codex")
+    service.authorize(codex.source_id)
+    index_summary = service.index_authorized_sources()
+    assert index_summary["sources"] == 1
+
+    status = service.status()
+    source_status = next(
+        item for item in status["sources"] if item["source_id"] == codex.source_id
+    )
+    assert source_status["status"] == "success"
+    assert source_status["parser_mode"] == "structured"
+    assert source_status["drift_detected"] is False
+
+    workspace_db = tmp_path / "workspace" / "anamnesis.sqlite"
+    stale_time = (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()
+    with sqlite3.connect(workspace_db) as connection:
+        connection.execute(
+            "UPDATE sources SET last_indexed_at = ? WHERE source_id = ?",
+            (stale_time, codex.source_id),
+        )
+    health = service.sync_health()
+    assert health["has_issues"] is True
+    assert health["issues"] == [
+        {"source_id": codex.source_id, "reason": "not_recent"}
+    ]

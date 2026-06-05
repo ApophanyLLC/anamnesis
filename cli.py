@@ -70,6 +70,13 @@ def _build_parser() -> argparse.ArgumentParser:
     search = sub.add_parser("search", help="Search the local index")
     search.add_argument("query")
     search.add_argument("--limit", type=int, default=10)
+    search.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Include indexing diagnostics with search output.",
+    )
+
+    sub.add_parser("status", help="Show per-source indexing health")
 
     sub.add_parser("versions", help="Show version information")
     return parser
@@ -105,7 +112,23 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "search":
-            _print_json({"results": service.search(args.query, limit=args.limit)})
+            results = service.search(args.query, limit=args.limit)
+            health = service.sync_health()
+            if args.verbose:
+                _print_json({"results": results, "index_health": health})
+            else:
+                if health["has_issues"]:
+                    issue_count = len(health["issues"])
+                    print(
+                        f"[!] Sync notice: {issue_count} source"
+                        f"{'s' if issue_count != 1 else ''} went silent. "
+                        "Run 'anamnesis status' for details."
+                    )
+                _print_json({"results": results})
+            return 0
+
+        if args.command == "status":
+            _print_json(service.status())
             return 0
 
         if args.command == "versions":

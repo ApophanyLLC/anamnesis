@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 import sqlite3
 
-from .models import Exchange, SessionDocument
+from .models import Exchange, ParsedSessionFile, SessionDocument
 from .parser_common import SessionParseError, build_document, documents_from_payload
 
 
@@ -28,8 +28,9 @@ def parse_copilot_sqlite(
     *,
     source_id: str,
     source_type: str,
-) -> tuple[SessionDocument, ...]:
+) -> ParsedSessionFile:
     documents: list[SessionDocument] = []
+    table_names: list[str] = []
     try:
         connection = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
         connection.row_factory = sqlite3.Row
@@ -38,8 +39,15 @@ def parse_copilot_sqlite(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
             ).fetchall()
             table_names = [row["name"] for row in table_rows]
+            matched_signature = False
 
             for table_name in table_names:
+                table_info = connection.execute(
+                    f"PRAGMA table_info({_quote_identifier(table_name)})"
+                ).fetchall()
+                columns = [column[1] for column in table_info]
+                if _match_copilot_signature(columns) is not None:
+                    matched_signature = True
                 documents.extend(
                     _parse_copilot_table(
                         connection,
@@ -49,9 +57,14 @@ def parse_copilot_sqlite(
                         path=path,
                     )
                 )
+            if table_names and not matched_signature:
+                raise SessionParseError(
+                    path,
+                    "schema_drift: no recognized copilot/session table shape found",
+                )
     except sqlite3.Error as exc:
         raise SessionParseError(path, f"sqlite_error: {exc}") from exc
-    return tuple(documents)
+    return ParsedSessionFile(tuple(documents), parser_mode="structured")
 
 
 def _parse_copilot_table(
