@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict
 import json
 from pathlib import Path
+from typing import Any
 
 from .filesystem import ensure_private_directory, ensure_private_file
 from .models import DiscoveredSource, SourceAuthorization
@@ -17,14 +18,29 @@ class AuthorizationStore:
         self.path = path
         self.authorizations = self._load()
 
-    def authorize(self, source: DiscoveredSource) -> SourceAuthorization:
+    def get(self, source_id: str) -> SourceAuthorization | None:
+        return self.authorizations.get(source_id)
+
+    def authorize(
+        self,
+        source: DiscoveredSource,
+        *,
+        policy_id: str,
+        policy_snapshot: dict[str, Any],
+        policy_mode: str = "current",
+        authorized_at: str = "",
+    ) -> SourceAuthorization:
         authorization = SourceAuthorization(
             source_id=source.source_id,
             source_type=source.source_type,
             display_name=source.display_name,
             path=source.path,
             authorized=True,
-            definition_id=source.definition_id,
+            definition_id=policy_id or source.definition_id,
+            policy_id=policy_id or source.definition_id,
+            policy_snapshot=policy_snapshot,
+            policy_mode=policy_mode,
+            authorized_at=authorized_at,
         )
         self.authorizations[source.source_id] = authorization
         self._save()
@@ -67,7 +83,11 @@ class AuthorizationStore:
                 display_name=str(item["display_name"]),
                 path=Path(str(item["path"])),
                 authorized=bool(item["authorized"]),
-                definition_id=str(item.get("definition_id") or ""),
+                definition_id=str(item.get("definition_id") or item.get("policy_id") or ""),
+                policy_id=str(item.get("policy_id") or item.get("definition_id") or ""),
+                policy_snapshot=dict(item.get("policy_snapshot") or {}),
+                policy_mode=str(item.get("policy_mode") or "current"),
+                authorized_at=str(item.get("authorized_at") or ""),
             )
             authorizations[authorization.source_id] = authorization
         return authorizations

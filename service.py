@@ -18,7 +18,15 @@ from .filesystem import (
     format_mode,
 )
 from .index import AnamnesisIndex
-from .models import DiscoveredSource, SearchResult, SourceAuthorization
+from .models import (
+    DiscoveredSource,
+    SearchResult,
+    SourceAuthorization,
+    SourceDefinition,
+    SourceIndexStatus,
+    policy_id_for_snapshot,
+    policy_snapshot_for_definition,
+)
 from .parsers import SessionParseError, parse_session_file
 from .registry import definitions_by_definition_id, definitions_by_source_type
 
@@ -40,9 +48,31 @@ class AnamnesisService:
             authorization_store=self.authorization_store,
         )
 
-    def authorize(self, source_id: str) -> SourceAuthorization:
+    def authorize(
+        self,
+        source_id: str,
+        *,
+        policy_snapshot: dict[str, Any] | None = None,
+        policy_mode: str = "current",
+        policy_id: str | None = None,
+        authorized_at: str | None = None,
+    ) -> SourceAuthorization:
         source = self._source_by_id(source_id)
-        return self.authorization_store.authorize(source)
+        source_definition = definitions_by_source_type().get(source.source_type)
+        if policy_snapshot is None and source_definition is not None:
+            policy_snapshot = policy_snapshot_for_definition(source_definition)
+        if policy_id is None:
+            if policy_snapshot is not None:
+                policy_id = policy_id_for_snapshot(policy_snapshot)
+            else:
+                policy_id = source.definition_id
+        return self.authorization_store.authorize(
+            source,
+            policy_id=policy_id,
+            policy_snapshot=policy_snapshot or {},
+            policy_mode=policy_mode,
+            authorized_at=authorized_at or _now_utc_iso(),
+        )
 
     def revoke(self, source_id: str) -> int:
         self.authorization_store.revoke(source_id)
@@ -57,27 +87,9 @@ class AnamnesisService:
         needs_compaction = False
         for authorization in self.authorization_store.authorized_sources():
             counts["sources"] += 1
-            source_definition = None
-            if authorization.definition_id:
-                source_definition = source_definitions_by_id.get(
-                    authorization.definition_id
-                )
-                if source_definition is None:
-                    source_error_diagnostics.append(
-                        {
-                            "source_id": authorization.source_id,
-                            "path": str(authorization.path),
-                            "reason": (
-                                "source_policy_drift: "
-                                f"unknown_definition_id={authorization.definition_id}"
-                            ),
-                        }
-                    )
-                    continue
-            if source_definition is None:
-                source_definition = source_definitions_by_type.get(
-                    authorization.source_type
-                )
+            source_definition = source_definitions_by_type.get(
+                authorization.source_type
+            )
             if source_definition is None:
                 source_error_diagnostics.append(
                     {
@@ -87,10 +99,66 @@ class AnamnesisService:
                     }
                 )
                 continue
-            file_suffixes = source_definition.file_suffixes
+
+            policy_snapshot = authorization.policy_snapshot
+            policy_id = authorization.policy_id or authorization.definition_id
+            ignored_files_due_to_policy_restriction = 0
+            effective_file_suffixes = source_definition.file_suffixes
+            if authorization.policy_mode == "legacy" and policy_snapshot:
+                effective_file_suffixes = self._suffixes_from_snapshot(
+                    policy_snapshot.get("file_suffixes", ())
+                )
+                ignored_files_due_to_policy_restriction = (
+                    self._count_ignored_policy_files(
+                        authorization,
+                        source_definition,
+                        effective_file_suffixes,
+                    )
+                )
+            else:
+                if policy_id:
+                    registered_definition = source_definitions_by_id.get(policy_id)
+                    if registered_definition is None:
+                        source_error_diagnostics.append(
+                    {
+                        "source_id": authorization.source_id,
+                        "path": str(authorization.path),
+                        "reason": (
+                                    "source_policy_drift: "
+                                    f"unknown_definition_id={policy_id}"
+                                ),
+                        }
+                    )
+                        continue
+                    if registered_definition.definition_id != source_definition.definition_id:
+                        source_error_diagnostics.append(
+                    {
+                        "source_id": authorization.source_id,
+                        "path": str(authorization.path),
+                        "reason": (
+                                    "source_policy_drift: "
+                                    f"unknown_definition_id={policy_id}"
+                                ),
+                        }
+                    )
+                        continue
+                effective_file_suffixes = self._suffixes_from_snapshot(
+                    policy_snapshot_for_definition(source_definition).get("file_suffixes", ())
+                )
+
+            if not effective_file_suffixes:
+                source_error_diagnostics.append(
+                    {
+                        "source_id": authorization.source_id,
+                        "path": str(authorization.path),
+                        "reason": "source_policy_snapshot_invalid: file_suffixes missing",
+                    }
+                )
+                continue
+
             source_files = iter_source_files(
                 authorization.path,
-                file_suffixes,
+                effective_file_suffixes,
                 source_type=authorization.source_type,
             )
             source_documents = []
@@ -147,6 +215,9 @@ class AnamnesisService:
                         last_index_status=source_last_status,
                         drift_detected=source_drift_detected,
                         parser_mode=effective_mode,
+                        ignored_files_due_to_policy_restriction=(
+                            ignored_files_due_to_policy_restriction
+                        ),
                         last_indexed_at=now_iso,
                     )
                 except sqlite3.Error as exc:
@@ -167,6 +238,9 @@ class AnamnesisService:
                     last_index_status=source_last_status,
                     drift_detected=source_drift_detected,
                     parser_mode=source_parser_mode,
+                    ignored_files_due_to_policy_restriction=(
+                        ignored_files_due_to_policy_restriction
+                    ),
                     last_indexed_at=now_iso,
                 )
             except sqlite3.Error as exc:
@@ -196,22 +270,39 @@ class AnamnesisService:
             status.source_id: status
             for status in self.index.source_statuses()
         }
+        authorizations_by_id = {
+            authorization.source_id: authorization
+            for authorization in self.authorization_store.authorizations.values()
+        }
         discovered_sources = self.discover()
         source_rows: list[dict[str, Any]] = []
         for discovered in discovered_sources:
             status = statuses_by_id.get(discovered.source_id)
+            authorization = authorizations_by_id.get(discovered.source_id)
             last_status = "not_indexed"
             parser_mode = "n/a"
             drift_detected = False
+            ignored_files_due_to_policy_restriction = 0
             last_indexed_at = None
+            policy_id = ""
+            policy_mode = ""
+            policy_snapshot = {}
             if status is not None:
                 last_status = status.last_index_status or "not_indexed"
                 parser_mode = status.parser_mode or "unknown"
                 drift_detected = status.drift_detected
                 last_indexed_at = status.last_indexed_at
+                ignored_files_due_to_policy_restriction = (
+                    status.ignored_files_due_to_policy_restriction
+                )
             if not discovered.authorized:
                 last_status = "not_authorized"
                 parser_mode = parser_mode if status else "n/a"
+                policy_mode = "not_authorized"
+            elif authorization is not None:
+                policy_id = authorization.policy_id or authorization.definition_id
+                policy_mode = authorization.policy_mode
+                policy_snapshot = authorization.policy_snapshot
             source_rows.append(
                 {
                     "source_id": discovered.source_id,
@@ -223,6 +314,10 @@ class AnamnesisService:
                     "status": last_status,
                     "parser_mode": parser_mode,
                     "drift_detected": drift_detected,
+                    "ignored_files_due_to_policy_restriction": ignored_files_due_to_policy_restriction,
+                    "policy_id": policy_id,
+                    "policy_mode": policy_mode,
+                    "policy_snapshot": policy_snapshot,
                 }
             )
         return {"sources": source_rows}
@@ -234,6 +329,7 @@ class AnamnesisService:
             for status in self.index.source_statuses()
         }
         issues: list[dict[str, str]] = []
+        ignored_files_due_to_policy_restriction = 0
         for source in self.authorization_store.authorized_sources():
             status = statuses_by_id.get(source.source_id)
             if status is None:
@@ -241,6 +337,18 @@ class AnamnesisService:
                     {
                         "source_id": source.source_id,
                         "reason": "not_indexed",
+                    }
+                )
+                continue
+            if status.ignored_files_due_to_policy_restriction:
+                ignored_files_due_to_policy_restriction += (
+                    status.ignored_files_due_to_policy_restriction
+                )
+                issues.append(
+                    {
+                        "source_id": source.source_id,
+                        "reason": "policy_restriction",
+                        "count": str(status.ignored_files_due_to_policy_restriction),
                     }
                 )
                 continue
@@ -292,7 +400,11 @@ class AnamnesisService:
                         "reason": "raw_text_fallback",
                     }
                 )
-        return {"issues": issues, "has_issues": bool(issues)}
+        return {
+            "issues": issues,
+            "has_issues": bool(issues),
+            "ignored_files_due_to_policy_restriction": ignored_files_due_to_policy_restriction,
+        }
 
     def search(self, query: str, *, limit: int = 10) -> tuple[SearchResult, ...]:
         return self.index.search(query, limit=limit)
@@ -384,6 +496,41 @@ class AnamnesisService:
             if source.source_id == source_id:
                 return source
         raise KeyError(f"unknown source_id: {source_id}")
+
+    def _suffixes_from_snapshot(self, suffixes: Any) -> tuple[str, ...]:
+        values = []
+        for value in suffixes or ():
+            if not isinstance(value, str):
+                continue
+            values.append(value)
+        return tuple(sorted(set(values)))
+
+    def _count_ignored_policy_files(
+        self,
+        authorization: SourceAuthorization,
+        source_definition: SourceDefinition,
+        effective_suffixes: tuple[str, ...],
+    ) -> int:
+        current_suffixes = source_definition.file_suffixes
+        if not effective_suffixes:
+            return 0
+        if not current_suffixes:
+            return 0
+        all_files = set(
+            iter_source_files(
+                authorization.path,
+                current_suffixes,
+                source_type=authorization.source_type,
+            )
+        )
+        effective_files = set(
+            iter_source_files(
+                authorization.path,
+                effective_suffixes,
+                source_type=authorization.source_type,
+            )
+        )
+        return len(all_files - effective_files)
 
     def _audit_mode(
         self,

@@ -13,7 +13,13 @@ from typing import Any
 
 from . import __version__
 from .index import AnamnesisSearchError
+from .models import (
+    SourceAuthorization,
+    policy_id_for_snapshot,
+    policy_snapshot_for_definition,
+)
 from .service import AnamnesisService
+from .registry import definitions_by_source_type
 
 
 def _json_default(value: object) -> object:
@@ -28,6 +34,100 @@ def _json_default(value: object) -> object:
 
 def _print_json(payload: Any, *, file: Any = None) -> None:
     print(json.dumps(payload, default=_json_default, indent=2, sort_keys=True), file=file)
+
+
+def _serialize_policy_value(value: object) -> list[str]:
+    return json.dumps(value, sort_keys=True, indent=2).splitlines()
+
+
+def _policy_diff_lines(old: dict[str, Any], new: dict[str, Any]) -> list[str]:
+    keys = tuple(sorted(set(old.keys()) | set(new.keys())))
+    lines: list[str] = []
+    for key in keys:
+        old_value = old.get(key)
+        new_value = new.get(key)
+        if old_value == new_value:
+            continue
+        lines.append(f"  {key}:")
+        for line in _serialize_policy_value(old_value):
+            lines.append(f"-   {line}")
+        for line in _serialize_policy_value(new_value):
+            lines.append(f"+   {line}")
+    return lines
+
+
+def _policy_escalation_detected(old: dict[str, Any], new: dict[str, Any]) -> bool:
+    risk_order = {"low": 0, "medium": 1, "high": 2}
+    if risk_order.get(str(new.get("risk_level", "")), 0) > risk_order.get(
+        str(old.get("risk_level", "")), 0
+    ):
+        return True
+    old_suffixes = sorted(str(value) for value in old.get("file_suffixes", ()))
+    new_suffixes = sorted(str(value) for value in new.get("file_suffixes", ()))
+    return len(set(new_suffixes) - set(old_suffixes)) > 0
+
+
+def _prompt_authorize_with_policy_review(
+    service: AnamnesisService, source_id: str
+) -> SourceAuthorization | None:
+    source = next(
+        (item for item in service.discover() if item.source_id == source_id), None
+    )
+    if source is None:
+        raise KeyError(f"unknown source_id: {source_id}")
+    authorization = service.authorization_store.get(source_id)
+    if authorization is None or not authorization.policy_snapshot:
+        return service.authorize(source_id)
+
+    source_definitions = definitions_by_source_type()
+    source_definition = source_definitions.get(source.source_type)
+    if source_definition is None:
+        return service.authorize(source_id)
+
+    current_snapshot = policy_snapshot_for_definition(source_definition)
+    current_policy_id = policy_id_for_snapshot(current_snapshot)
+    if authorization.policy_id == current_policy_id and (
+        authorization.policy_snapshot == current_snapshot
+        or authorization.policy_mode != "legacy"
+    ):
+        return authorization
+
+    print(f"Policy update for {source.display_name}:")
+    for line in _policy_diff_lines(authorization.policy_snapshot, current_snapshot):
+        print(line)
+    escalation = _policy_escalation_detected(authorization.policy_snapshot, current_snapshot)
+    while True:
+        selected = (
+            input(
+                "Choose: [1] Accept new policy, [2] Keep legacy policy, "
+                "[3] Cancel [default: 3]: "
+            ).strip()
+            or "3"
+        )
+        if selected == "3":
+            print("Authorization cancelled.")
+            return None
+        if selected == "1":
+            if escalation:
+                confirmation = input("Type 'accept log' to continue: ").strip()
+                if confirmation != "accept log":
+                    print("Authorization cancelled.")
+                    return None
+            return service.authorize(
+                source_id,
+                policy_snapshot=current_snapshot,
+                policy_mode="current",
+                policy_id=current_policy_id,
+            )
+        if selected == "2":
+            return service.authorize(
+                source_id,
+                policy_snapshot=authorization.policy_snapshot,
+                policy_mode="legacy",
+            )
+        if selected not in {"1", "2", "3"}:
+            print("Invalid option. Use 1, 2, or 3.")
+            continue
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -93,7 +193,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "authorize":
-            _print_json({"authorization": service.authorize(args.source_id)})
+            authorization = _prompt_authorize_with_policy_review(service, args.source_id)
+            if authorization is None:
+                return 2
+            _print_json({"authorization": authorization})
             return 0
 
         if args.command == "revoke":

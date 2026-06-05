@@ -77,6 +77,8 @@ or a validated e-discovery/preservation system.
   explicit export files under `~/Anamnesis`.
 - Separates discovery from content reads.
 - Persists explicit authorization in `sources.authorization.json`.
+- Stores policy snapshots with each authorization so policy changes are diffed before re-authorization.
+- Tracks legacy-policy consent (`policy_mode`) and policy-restricted file ignores for audit visibility.
 - Parses JSON, JSONL, Markdown, and text source files; ZIP export parsing reads
   JSON members only.
 - Limits ChatGPT export discovery to `~/Anamnesis/chatgpt_exports`, accepting
@@ -111,8 +113,21 @@ python -m anamnesis privacy-audit
 python -m anamnesis privacy-audit --fix-permissions
 python -m anamnesis search "auth architecture decision"
 python -m anamnesis search "auth architecture decision" --verbose
+python -m anamnesis authorize "<source_id>"  # re-checks policy diffs on drift and offers legacy mode
 python -m anamnesis revoke "<source_id>"
 ```
+
+When a source policy changes, `authorize` prints a terminal diff and requires
+explicit user choice:
+
+- `[1]` accept the new policy (applies full current policy),
+- `[2]` keep legacy restrictions (indexes only previously-allowed files),
+- `[3]` cancel.
+
+Run `anamnesis status` or `anamnesis search --verbose` to inspect policy-mode
+status and any `ignored_files_due_to_policy_restriction` counters.
+
+Policy diffs and approvals are recorded in `CHANGELOG.md`.
 
 After installation, the console script is also available:
 

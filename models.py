@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 import hashlib
 import json
@@ -73,6 +73,10 @@ class SourceAuthorization:
     path: Path
     authorized: bool
     definition_id: str = ""
+    policy_id: str = ""
+    policy_snapshot: dict[str, Any] = field(default_factory=dict)
+    policy_mode: str = "current"
+    authorized_at: str = ""
 
 
 @dataclass(frozen=True)
@@ -120,6 +124,7 @@ class SourceIndexStatus:
     last_index_status: str | None
     drift_detected: bool
     parser_mode: str | None
+    ignored_files_due_to_policy_restriction: int = 0
 
 
 @dataclass(frozen=True)
@@ -158,3 +163,41 @@ def _source_definition_id(definition: SourceDefinition) -> str:
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
     return f"{definition.source_type}:{digest[:16]}"
+
+
+def policy_snapshot_for_definition(definition: SourceDefinition) -> dict[str, Any]:
+    """Convert a source definition into a stable policy snapshot."""
+
+    return {
+        "source_type": definition.source_type,
+        "display_name": definition.display_name,
+        "file_suffixes": list(definition.file_suffixes),
+        "accepted_file_shapes": list(definition.accepted_file_shapes),
+        "risk_level": definition.risk_level,
+        "parser_owner": definition.parser_owner,
+        "default_discovery_policy": definition.default_discovery_policy,
+        "access_method": definition.access_method,
+        "storage_model": definition.storage_model,
+        "local_path_format": definition.local_path_format,
+        "drift_warning": definition.drift_warning,
+    }
+
+
+def policy_id_for_snapshot(snapshot: dict[str, Any]) -> str:
+    """Compute a stable policy identifier for a policy snapshot."""
+
+    source_type = str(snapshot.get("source_type", ""))
+    payload = {
+        "accepted_file_shapes": list(snapshot.get("accepted_file_shapes", [])),
+        "access_method": str(snapshot.get("access_method", "")),
+        "default_discovery_policy": str(snapshot.get("default_discovery_policy", "")),
+        "drift_warning": str(snapshot.get("drift_warning", "")),
+        "file_suffixes": list(snapshot.get("file_suffixes", [])),
+        "parser_owner": str(snapshot.get("parser_owner", "")),
+        "risk_level": str(snapshot.get("risk_level", "")),
+        "storage_model": str(snapshot.get("storage_model", "")),
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return f"{source_type}:{digest[:16]}"

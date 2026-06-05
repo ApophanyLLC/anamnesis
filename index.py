@@ -34,7 +34,8 @@ class AnamnesisIndex:
                     last_indexed_at TEXT,
                     last_index_status TEXT,
                     drift_detected INTEGER NOT NULL DEFAULT 0,
-                    parser_mode TEXT
+                    parser_mode TEXT,
+                    ignored_files_due_to_policy_restriction INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE TABLE IF NOT EXISTS sessions (
                     session_id TEXT NOT NULL,
@@ -82,6 +83,7 @@ class AnamnesisIndex:
         last_index_status: str = "success",
         drift_detected: bool = False,
         parser_mode: str = "structured",
+        ignored_files_due_to_policy_restriction: int = 0,
         last_indexed_at: str | None = None,
     ) -> int:
         """Atomically replace one source's active index after parsing succeeds.
@@ -108,6 +110,7 @@ class AnamnesisIndex:
                 last_index_status=last_index_status,
                 drift_detected=drift_detected,
                 parser_mode=parser_mode,
+                ignored_files_due_to_policy_restriction=ignored_files_due_to_policy_restriction,
                 last_indexed_at=last_indexed_at,
             )
             for document in documents:
@@ -131,6 +134,7 @@ class AnamnesisIndex:
         last_index_status: str,
         drift_detected: bool,
         parser_mode: str,
+        ignored_files_due_to_policy_restriction: int = 0,
         last_indexed_at: str | None = None,
     ) -> None:
         self.initialize()
@@ -141,6 +145,7 @@ class AnamnesisIndex:
                 last_index_status=last_index_status,
                 drift_detected=drift_detected,
                 parser_mode=parser_mode,
+                ignored_files_due_to_policy_restriction=ignored_files_due_to_policy_restriction,
                 last_indexed_at=last_indexed_at,
             )
 
@@ -157,7 +162,8 @@ class AnamnesisIndex:
                     last_indexed_at,
                     last_index_status,
                     drift_detected,
-                    parser_mode
+                    parser_mode,
+                    ignored_files_due_to_policy_restriction
                 FROM sources
                 ORDER BY source_id
                 """
@@ -172,6 +178,7 @@ class AnamnesisIndex:
                 last_index_status=row[5] if row[5] is not None else None,
                 drift_detected=bool(row[6]),
                 parser_mode=row[7] if row[7] is not None else None,
+                ignored_files_due_to_policy_restriction=int(row[8] or 0),
             )
             for row in rows
         )
@@ -332,14 +339,16 @@ class AnamnesisIndex:
         last_index_status: str | None = None,
         drift_detected: bool = False,
         parser_mode: str | None = None,
+        ignored_files_due_to_policy_restriction: int = 0,
         last_indexed_at: str | None = None,
     ) -> None:
         conn.execute(
             """
             INSERT OR REPLACE INTO sources (
                 source_id, source_type, display_name, path, last_indexed_at,
-                last_index_status, drift_detected, parser_mode
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                last_index_status, drift_detected, parser_mode,
+                ignored_files_due_to_policy_restriction
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 source.source_id,
@@ -350,6 +359,7 @@ class AnamnesisIndex:
                 last_index_status,
                 1 if drift_detected else 0,
                 parser_mode,
+                ignored_files_due_to_policy_restriction,
             ),
         )
 
@@ -367,6 +377,13 @@ class AnamnesisIndex:
             )
         if "parser_mode" not in existing_columns:
             conn.execute("ALTER TABLE sources ADD COLUMN parser_mode TEXT")
+        if (
+            "ignored_files_due_to_policy_restriction"
+            not in existing_columns
+        ):
+            conn.execute(
+                "ALTER TABLE sources ADD COLUMN ignored_files_due_to_policy_restriction INTEGER NOT NULL DEFAULT 0"
+            )
 
 
 def _build_safe_fts_query(query: str) -> str:
