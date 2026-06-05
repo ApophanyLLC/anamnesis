@@ -11,6 +11,10 @@
 - Added `sync_warnings` tracking to source status records so search emits a one-line
   notice when sources are stale or impaired and keeps the warning in local
   diagnostics (`status`, `debug-report`, `privacy-audit --generate-report`).
+- Added first-generation vendor parser-adapter registry and versioned policy
+  snapshots. Parsing is now routed through adapter owners (`parser_documents`,
+  `parser_copilot`) and documents can degrade to raw-text fallback mode when
+  structured schema drift is detected, while preserving search/index continuity.
 
 ## 2026-06-04
 

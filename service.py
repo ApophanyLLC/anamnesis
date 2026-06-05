@@ -240,6 +240,9 @@ class AnamnesisService:
                         path,
                         source_id=authorization.source_id,
                         source_type=authorization.source_type,
+                        parser_owner=source_definition.parser_owner
+                        if source_definition is not None
+                        else None,
                     )
                 except SessionParseError as exc:
                     if exc.reason.startswith("schema_drift:"):
@@ -283,9 +286,11 @@ class AnamnesisService:
                     source_parser_mode = "fallback_text"
                 parsed_file_count += len(parsed_file.documents)
                 if parsed_file.drift_detected:
-                    source_last_status = "drift_error"
                     source_drift_detected = True
-                    break
+                    if "Structured parser fallback to raw-text mode for this source file." not in source_sync_warnings:
+                        source_sync_warnings.append(
+                            "Structured parser fallback to raw-text mode for this source file."
+                        )
                 source_documents.extend(parsed_file.documents)
             source_last_modified_at = (
                 discovered_source.last_modified_at if discovered_source else None
@@ -519,15 +524,22 @@ class AnamnesisService:
                     "status": last_status,
                     "parser_mode": parser_mode,
                     "parser_mode_label": _parser_mode_label(parser_mode),
-                    "parser_mode_chunking_tooltip": _parser_mode_chunking_tooltip(parser_mode),
+                    "parser_mode_chunking_tooltip": _parser_mode_chunking_tooltip(
+                        parser_mode
+                    ),
                     "drift_detected": drift_detected,
-                    "ignored_files_due_to_policy_restriction": ignored_files_due_to_policy_restriction,
+                    "ignored_files_due_to_policy_restriction": (
+                        ignored_files_due_to_policy_restriction
+                    ),
                     "error_count": status.error_count if status else 0,
                     "error_summary": status.error_summary if status else {},
                     "sync_warnings": status.sync_warnings if status else [],
                     "policy_id": policy_id,
                     "policy_mode": policy_mode,
                     "policy_snapshot": policy_snapshot,
+                    "parser_adapter_version": policy_snapshot.get(
+                        "parser_adapter_version", ""
+                    ),
                 }
             )
         return {"sources": source_rows}

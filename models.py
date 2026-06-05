@@ -10,6 +10,19 @@ from pathlib import Path
 from typing import Any
 
 
+_ADAPTER_DEFAULT_VERSIONS = {
+    "parser_documents": "documents/v1",
+    "parser_documents_candidate": "documents/v1",
+    "parser_copilot": "copilot-sqlite/v1",
+    "parser_copilot_candidate": "copilot-sqlite/v1",
+    "parser_copilot_cli_candidate": "copilot-cli/v1",
+    "parser_openwebui_candidate": "openwebui/v1",
+    "parser_anythingllm_candidate": "anythingllm/v1",
+    "parser_workspace_artifact_candidate": "workspace-artifact/v1",
+    "unassigned": "unassigned",
+}
+
+
 @dataclass(frozen=True)
 class SourceDefinition:
     """Governed capability record for a known AI session source."""
@@ -23,6 +36,7 @@ class SourceDefinition:
     accepted_file_shapes: tuple[str, ...]
     risk_level: str
     parser_owner: str
+    parser_adapter_version: str = ""
     storage_model: str = ""
     local_path_format: str = ""
     user_access_steps: tuple[str, ...] = ()
@@ -32,6 +46,14 @@ class SourceDefinition:
     definition_id: str = ""
 
     def __post_init__(self) -> None:
+        if not self.parser_adapter_version:
+            object.__setattr__(
+                self,
+                "parser_adapter_version",
+                _ADAPTER_DEFAULT_VERSIONS.get(
+                    self.parser_owner, f"unknown/{self.parser_owner}"
+                ),
+            )
         if not self.definition_id:
             object.__setattr__(self, "definition_id", _source_definition_id(self))
 
@@ -156,6 +178,7 @@ def _source_definition_id(definition: SourceDefinition) -> str:
         "file_suffixes": list(definition.file_suffixes),
         "local_path_format": definition.local_path_format,
         "notes": definition.notes,
+        "parser_adapter_version": definition.parser_adapter_version,
         "parser_owner": definition.parser_owner,
         "risk_level": definition.risk_level,
         "source_type": definition.source_type,
@@ -178,6 +201,7 @@ def policy_snapshot_for_definition(definition: SourceDefinition) -> dict[str, An
         "accepted_file_shapes": list(definition.accepted_file_shapes),
         "risk_level": definition.risk_level,
         "parser_owner": definition.parser_owner,
+        "parser_adapter_version": definition.parser_adapter_version,
         "default_discovery_policy": definition.default_discovery_policy,
         "access_method": definition.access_method,
         "storage_model": definition.storage_model,
@@ -197,6 +221,7 @@ def policy_id_for_snapshot(snapshot: dict[str, Any]) -> str:
         "drift_warning": str(snapshot.get("drift_warning", "")),
         "file_suffixes": list(snapshot.get("file_suffixes", [])),
         "parser_owner": str(snapshot.get("parser_owner", "")),
+        "parser_adapter_version": str(snapshot.get("parser_adapter_version", "")),
         "risk_level": str(snapshot.get("risk_level", "")),
         "storage_model": str(snapshot.get("storage_model", "")),
     }

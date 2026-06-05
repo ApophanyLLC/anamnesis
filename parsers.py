@@ -6,13 +6,7 @@ from pathlib import Path
 
 from .models import ParsedSessionFile
 from .parser_common import SessionParseError
-from .parser_copilot import COPILOT_SQLITE_SUFFIXES, parse_copilot_sqlite
-from .parser_documents import (
-    parse_json_document,
-    parse_jsonl_document,
-    parse_text_document,
-    parse_zip_export,
-)
+from .parser_adapters import get_adapter
 
 
 def parse_session_file(
@@ -20,26 +14,33 @@ def parse_session_file(
     *,
     source_id: str,
     source_type: str,
+    parser_owner: str | None = None,
 ) -> ParsedSessionFile:
-    suffix = path.suffix.lower()
-    if source_type == "copilot_vscode" and suffix in COPILOT_SQLITE_SUFFIXES:
-        return parse_copilot_sqlite(
+    if parser_owner is None:
+        parser_owner = "unassigned"
+
+    adapter = get_adapter(parser_owner)
+    try:
+        return adapter.parse(
             path,
             source_id=source_id,
             source_type=source_type,
         )
-    if suffix == ".zip":
-        return parse_zip_export(path, source_id=source_id, source_type=source_type)
-    if suffix == ".json":
-        if source_type == "chatgpt_export" and path.name != "conversations.json":
-            return ParsedSessionFile(
-                tuple(),
-                parser_mode="raw_text",
-            )
-        return parse_json_document(path, source_id=source_id, source_type=source_type)
-    if suffix == ".jsonl":
-        return parse_jsonl_document(path, source_id=source_id, source_type=source_type)
-    return parse_text_document(path, source_id=source_id, source_type=source_type)
+    except SessionParseError as exc:
+        if not str(exc.reason).startswith("schema_drift:"):
+            raise
+        if adapter.fallback_parse is None:
+            raise
+        fallback = adapter.fallback_parse(
+            path,
+            source_id=source_id,
+            source_type=source_type,
+        )
+        return ParsedSessionFile(
+            fallback.documents,
+            parser_mode="raw_text",
+            drift_detected=True,
+        )
 
 
 __all__ = ["SessionParseError", "parse_session_file"]
