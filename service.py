@@ -904,10 +904,64 @@ class AnamnesisService:
                 "provider": encryption_status["provider"],
             }
         )
+        sqlcipher_dependency_ok = bool(
+            (not encryption_status["enabled"]) or encryption_status["sqlcipher_available"]
+        )
+        checks.append(
+            {
+                "id": "database_encryption_sqlcipher_dependency",
+                "ok": sqlcipher_dependency_ok,
+                "path": str(database_path),
+                "expected": "sqlcipher_available_if_enabled",
+                "actual": "not_required"
+                if not encryption_status["enabled"]
+                else "available"
+                if encryption_status["sqlcipher_available"]
+                else "missing",
+                "note": "sqlcipher support is required when encryption is enabled",
+            }
+        )
+        if encryption_status["enabled"] and not encryption_status["sqlcipher_available"]:
+            warnings.append(
+                {
+                    "id": "database_encryption_dependency_missing",
+                    "path": str(database_path),
+                    "message": (
+                        "The SQLCipher runtime is not available, so encrypted "
+                        "database mode cannot be opened or verified."
+                    ),
+                }
+            )
+        if (
+            encryption_status["enabled"]
+            and encryption_status["provider"] == "keyring"
+            and not encryption_status["keyring_available"]
+        ):
+            checks.append(
+                {
+                    "id": "database_encryption_keyring_dependency",
+                    "ok": False,
+                    "path": str(database_path),
+                    "expected": "keyring_available",
+                    "actual": "missing",
+                }
+            )
+            warnings.append(
+                {
+                    "id": "database_encryption_keyring_missing",
+                    "path": str(database_path),
+                    "message": (
+                        "Encryption is configured for keyring-based keys, but the "
+                        "system keyring dependency is unavailable."
+                    ),
+                }
+            )
 
         if database_path.exists():
             if encryption_status["enabled"]:
                 try:
+                    if not sqlcipher_dependency_ok:
+                        raise RuntimeError("sqlcipher dependency is unavailable")
                     db_key = self.encryption_manager.resolve_key(
                         password=self._database_password
                     )

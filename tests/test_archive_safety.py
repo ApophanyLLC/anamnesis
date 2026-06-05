@@ -517,6 +517,86 @@ def test_privacy_audit_reports_and_fixes_sqlite_sidecars(tmp_path: Path) -> None
         assert _mode(sidecar) == 0o600
 
 
+def test_privacy_audit_reports_missing_sqlcipher_dependency_when_encryption_is_enabled(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    manifest_path = workspace / "database-encryption.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "enabled": True,
+                "provider": "password",
+                "key_salt": "c2Vjb25kX3NhbHQ=",
+                "key_iterations": 120000,
+                "keyring_service": "anamnesis",
+                "keyring_key_name": "index-encryption-secret",
+                "created_at": "2026-06-04T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(service_module, "supports_sqlcipher", lambda: False)
+    service = AnamnesisService(workspace_root=workspace, home=tmp_path / "home")
+    audit = service.privacy_audit()
+
+    sqlcipher_check = _check_by_id(audit, "database_encryption_sqlcipher_dependency")
+    assert sqlcipher_check["ok"] is False
+    assert any(
+        item["id"] == "database_encryption_dependency_missing"
+        for item in audit["warnings"]
+    )
+
+
+def test_privacy_audit_reports_invalid_encrypted_db_key_verification(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    database_path = workspace / "anamnesis.sqlite"
+    manifest_path = workspace / "database-encryption.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "enabled": True,
+                "provider": "password",
+                "key_salt": "dGVzdF9zYWx0",
+                "key_iterations": 120000,
+                "keyring_service": "anamnesis",
+                "keyring_key_name": "index-encryption-secret",
+                "created_at": "2026-06-04T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("CREATE TABLE marker (id INTEGER PRIMARY KEY)")
+
+    monkeypatch.setattr(service_module, "supports_sqlcipher", lambda: True)
+    monkeypatch.setattr(
+        service_module,
+        "probe_sqlcipher_connection",
+        lambda *_args, **_kwargs: False,
+    )
+
+    service = AnamnesisService(workspace_root=workspace, home=home)
+    service.set_database_password("test-password")
+    audit = service.privacy_audit()
+
+    key_check = _check_by_id(audit, "database_encryption_key")
+    assert key_check["ok"] is False
+    assert key_check["actual"] == "invalid"
+    assert any(
+        item["id"] == "database_encryption_verification_failed"
+        for item in audit["warnings"]
+    )
+
+
 def test_privacy_audit_cli_outputs_json_without_creating_workspace(
     tmp_path: Path,
 ) -> None:

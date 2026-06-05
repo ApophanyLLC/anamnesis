@@ -71,6 +71,8 @@ For stronger at-rest protection, SQLCipher encryption is available with
 `anamnesis encryption --setup` (password mode) or
 `anamnesis encryption --setup --use-keyring`. Use `--db-password` on
 encryption-dependent commands after setup when password mode is configured.
+The first-time `encryption --setup` flow also offers interactive mode selection
+between password and OS keyring-backed unlock secrets.
 
 Review what you authorize, keep backups and workspace locations in mind, and do
 not treat this as a substitute for formal incident response or a validated

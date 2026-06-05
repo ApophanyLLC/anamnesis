@@ -5,6 +5,9 @@
 - Added SQLCipher-at-rest encryption for the index database via:
   `anamnesis encryption --setup` (password mode) and
   `anamnesis encryption --setup --use-keyring` (OS keyring mode).
+- Added interactive SQLCipher setup prompt (`password` vs `OS keyring`) and added
+  privacy-audit dependency checks for SQLCipher/keyring runtime availability when
+  encrypted mode is enabled.
 - Added database privacy-audit coverage for encryption status, key availability,
   and decryption verification.
 - Added sync-time index health surfacing for schema drift-induced staleness:

@@ -44,6 +44,10 @@ last_reviewed: '2026-06-05'
 
 - SQLCipher protects the primary index file from direct reads by unauthorized parties
   when the workspace file is stolen.
+- `anamnesis encryption --setup` enables encryption before indexing starts.
+  Password mode prompts for a master password on first run and saves only a derived
+  key digest in `database-encryption.json`; keyring mode stores a local secret in
+  the OS keyring.
 - Encryption does not protect:
   - plaintext exports and manual input sources before indexing,
   - plaintext tokens held in RAM during search/index operations,

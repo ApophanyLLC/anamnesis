@@ -14,6 +14,7 @@ from typing import Any
 
 from . import __version__
 from .index import AnamnesisSearchError
+from .encryption import supports_keyring
 from .models import (
     SearchResult,
     SourceAuthorization,
@@ -357,6 +358,22 @@ def _require_database_password_interactively(service: AnamnesisService, args: An
     service.set_database_password(password or None)
 
 
+def _select_encryption_provider(*, ask: bool = True) -> str:
+    if not ask:
+        return "password"
+    if not supports_keyring():
+        return "password"
+    while True:
+        selected = input(
+            "Enable SQLCipher setup: [1] password-protected key (default), [2] OS keyring: "
+        ).strip().lower()
+        if selected in {"", "1", "p", "password"}:
+            return "password"
+        if selected in {"2", "k", "keyring"}:
+            return "keyring"
+        print("Invalid option. Enter 1 or 2.")
+
+
 def _prompt_authorize_with_policy_review(
     service: AnamnesisService, source_id: str, *, auto_approve: bool
 ) -> SourceAuthorization | None:
@@ -599,10 +616,18 @@ def main(argv: list[str] | None = None) -> int:
                 if args.use_keyring:
                     _print_json(service.setup_database_encryption(use_keyring=True))
                 else:
-                    password = args.db_password
-                    if password is None:
-                        password = getpass("Set master password for encrypted database: ")
-                    _print_json(service.setup_database_encryption(password=password))
+                    ask = sys.stdin.isatty() and args.db_password is None
+                    if args.db_password is None:
+                        provider = _select_encryption_provider(ask=ask)
+                    else:
+                        provider = "password"
+                    if provider == "keyring":
+                        _print_json(service.setup_database_encryption(use_keyring=True))
+                    else:
+                        password = args.db_password
+                        if password is None:
+                            password = getpass("Set master password for encrypted database: ")
+                        _print_json(service.setup_database_encryption(password=password))
                 return 0
             _print_json(service.database_encryption_status())
             return 0
