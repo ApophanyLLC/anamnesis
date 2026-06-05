@@ -9,6 +9,12 @@ from typing import Any
 
 from .authorization import AuthorizationStore
 from .discovery import discover_sources, iter_source_files
+from .encryption import (
+    DatabaseEncryptionManager,
+    copy_plain_to_sqlcipher_database,
+    supports_sqlcipher,
+    probe_sqlcipher_connection,
+)
 from .filesystem import (
     PRIVATE_DIR_MODE,
     PRIVATE_FILE_MODE,
@@ -34,13 +40,114 @@ from .registry import definitions_by_definition_id, definitions_by_source_type
 class AnamnesisService:
     """Coordinates discovery, authorization, indexing, and search."""
 
-    def __init__(self, workspace_root: Path | None = None, *, home: Path | None = None) -> None:
+    def __init__(
+        self,
+        workspace_root: Path | None = None,
+        *,
+        home: Path | None = None,
+        database_password: str | None = None,
+    ) -> None:
         self.workspace_root = (workspace_root or Path.home() / ".anamnesis").expanduser()
         self.home = home or Path.home()
+        self._database_password = database_password
         self.authorization_store = AuthorizationStore(
             self.workspace_root / "sources.authorization.json"
         )
-        self.index = AnamnesisIndex(self.workspace_root / "anamnesis.sqlite")
+        self.encryption_manager = DatabaseEncryptionManager(
+            self.workspace_root / "database-encryption.json"
+        )
+        self.index = AnamnesisIndex(
+            self.workspace_root / "anamnesis.sqlite",
+            encryption_config=self.encryption_manager.config,
+        )
+
+    def set_database_password(self, password: str | None) -> None:
+        self._database_password = password
+
+    def _configure_index_connection(self) -> None:
+        if self.encryption_manager.config.enabled:
+            key = self.encryption_manager.resolve_key(password=self._database_password)
+            if key is None:
+                raise RuntimeError(
+                    "database encryption is enabled but no decryption key is configured"
+                )
+            self.index.set_encryption_config(self.encryption_manager.config, key)
+            return
+        self.index.set_encryption_key(None)
+
+    def setup_database_encryption(
+        self,
+        *,
+        use_keyring: bool = False,
+        password: str | None = None,
+    ) -> dict[str, Any]:
+        if self.encryption_manager.config.enabled:
+            return {
+                "enabled": True,
+                "message": "database encryption already configured",
+            }
+
+        if use_keyring:
+            key = self.encryption_manager.build_keyring_setup()
+        else:
+            if not password:
+                raise ValueError("master password required for password-based setup")
+            key = self.encryption_manager.build_password_setup(password)
+        if not supports_sqlcipher():
+            raise RuntimeError("SQLCipher runtime dependency is not available")
+
+        staged_path = self.index.path.with_name("anamnesis.sqlite.encrypted")
+        backup_path = self.index.path.with_name("anamnesis.sqlite.plain.bak")
+        if backup_path.exists():
+            backup_path.unlink()
+        if staged_path.exists():
+            staged_path.unlink()
+        try:
+            copy_plain_to_sqlcipher_database(
+                self.index.path,
+                staged_path,
+                key,
+            )
+            if self.index.path.exists():
+                self.index.path.replace(backup_path)
+            staged_path.replace(self.index.path)
+            self.index.path.parent.mkdir(parents=True, exist_ok=True)
+            ensure_private_file(self.index.path)
+            self.encryption_manager.save()
+            self.index.set_encryption_config(
+                self.encryption_manager.config,
+                key,
+            )
+            if not probe_sqlcipher_connection(self.index.path, key):
+                if backup_path.exists() and self.index.path.exists():
+                    self.index.path.unlink()
+                    backup_path.replace(self.index.path)
+                raise RuntimeError("encrypted database verification failed")
+            if backup_path.exists():
+                backup_path.unlink()
+            return {
+                "enabled": True,
+                "provider": self.encryption_manager.config.provider,
+            }
+        except Exception:
+            if backup_path.exists():
+                if self.index.path.exists():
+                    self.index.path.unlink()
+                backup_path.replace(self.index.path)
+            raise
+        finally:
+            if staged_path.exists():
+                staged_path.unlink()
+
+    def database_encryption_status(self) -> dict[str, Any]:
+        payload = self.encryption_manager.status()
+        payload.update(
+            {
+                "database_path": str(self.index.path),
+                "manifest_path": str(self.workspace_root / "database-encryption.json"),
+            }
+        )
+        return payload
 
     def discover(self) -> tuple[DiscoveredSource, ...]:
         return discover_sources(
@@ -75,10 +182,12 @@ class AnamnesisService:
         )
 
     def revoke(self, source_id: str) -> int:
+        self._configure_index_connection()
         self.authorization_store.revoke(source_id)
         return self.index.purge_source(source_id)
 
     def index_authorized_sources(self) -> dict[str, Any]:
+        self._configure_index_connection()
         counts: dict[str, Any] = {"documents": 0, "chunks": 0, "sources": 0}
         skipped_file_diagnostics: list[dict[str, str]] = []
         source_error_diagnostics: list[dict[str, str]] = []
@@ -476,6 +585,7 @@ class AnamnesisService:
         )
 
     def status(self) -> dict[str, Any]:
+        self._configure_index_connection()
         statuses_by_id = {
             status.source_id: status
             for status in self.index.source_statuses()
@@ -545,6 +655,7 @@ class AnamnesisService:
         return {"sources": source_rows}
 
     def sync_health(self, *, stale_after_days: int = 30) -> dict[str, Any]:
+        self._configure_index_connection()
         thresholds = datetime.now(timezone.utc) - timedelta(days=stale_after_days)
         statuses_by_id = {
             status.source_id: status
@@ -640,6 +751,7 @@ class AnamnesisService:
         }
 
     def search(self, query: str, *, limit: int = 10) -> tuple[SearchResult, ...]:
+        self._configure_index_connection()
         return self.index.search(query, limit=limit)
 
     def privacy_audit(self, *, fix_permissions: bool = False) -> dict[str, Any]:
@@ -647,6 +759,7 @@ class AnamnesisService:
 
     def debug_report(self) -> dict[str, Any]:
         privacy_audit = self._collect_privacy_audit()
+        self._configure_index_connection()
         status_payload = self.status()
         source_status_rows = []
         total_error_summary: dict[str, int] = self._empty_error_summary()
@@ -758,8 +871,72 @@ class AnamnesisService:
                 fix_permissions=fix_permissions,
             )
 
+        encryption_status = self.encryption_manager.status()
+        checks.append(
+            {
+                "id": "database_encryption_enabled",
+                "ok": bool(encryption_status["enabled"]),
+                "path": str(database_path),
+                "expected": "enabled" if encryption_status["enabled"] else "disabled",
+                "actual": "enabled" if encryption_status["enabled"] else "disabled",
+                "provider": encryption_status["provider"],
+            }
+        )
+
         if database_path.exists():
-            secure_delete_ok = self.index.secure_delete_enabled()
+            if encryption_status["enabled"]:
+                try:
+                    db_key = self.encryption_manager.resolve_key(
+                        password=self._database_password
+                    )
+                except Exception:
+                    db_key = None
+                if db_key is None:
+                    secure_delete_ok = False
+                    checks.append(
+                        {
+                            "id": "database_encryption_key",
+                            "ok": False,
+                            "path": str(database_path),
+                            "expected": "decryption_key_available",
+                            "actual": "missing",
+                        }
+                    )
+                    warnings.append(
+                        {
+                            "id": "database_key_missing_for_audit",
+                            "path": str(database_path),
+                            "message": (
+                                "Anamnesis is configured for encrypted DB mode, but "
+                                "privacy-audit could not load the unlock secret. "
+                                "Pass --db-password or set a local keyring secret "
+                                "before rerunning audit."
+                            ),
+                        }
+                    )
+                elif not probe_sqlcipher_connection(database_path, db_key):
+                    secure_delete_ok = False
+                    checks.append(
+                        {
+                            "id": "database_encryption_key",
+                            "ok": False,
+                            "path": str(database_path),
+                            "expected": "valid_key",
+                            "actual": "invalid",
+                        }
+                    )
+                    warnings.append(
+                        {
+                            "id": "database_encryption_verification_failed",
+                            "path": str(database_path),
+                            "message": "Could not open encrypted database for verification.",
+                        }
+                    )
+                else:
+                    self.index.set_encryption_config(self.encryption_manager.config, db_key)
+                    secure_delete_ok = self.index.secure_delete_enabled()
+            else:
+                secure_delete_ok = self.index.secure_delete_enabled()
             checks.append(
                 {
                     "id": "sqlite_secure_delete",
@@ -769,17 +946,18 @@ class AnamnesisService:
                     "actual": "1" if secure_delete_ok else "0",
                 }
             )
-            warnings.append(
-                {
-                    "id": "plaintext_sqlite",
-                    "path": str(database_path),
-                    "message": (
-                        "anamnesis.sqlite is plaintext searchable SQLite; "
-                        "secure_delete, VACUUM, and restrictive permissions do "
-                        "not provide encryption-at-rest."
-                    ),
-                }
-            )
+            if not encryption_status["enabled"]:
+                warnings.append(
+                    {
+                        "id": "plaintext_sqlite",
+                        "path": str(database_path),
+                        "message": (
+                            "anamnesis.sqlite is plaintext searchable SQLite; "
+                            "secure_delete, VACUUM, and restrictive permissions do "
+                            "not provide encryption-at-rest."
+                        ),
+                    }
+                )
 
         return {
             "ok": all(check["ok"] for check in checks),

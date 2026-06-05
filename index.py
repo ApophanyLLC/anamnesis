@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import sqlite3
 
+from .encryption import DatabaseEncryptionConfig, open_sqlcipher_connection
 from .filesystem import ensure_private_directory, ensure_private_file
 from .models import SearchResult, SessionDocument, SourceAuthorization, SourceIndexStatus
 
@@ -18,8 +19,27 @@ class AnamnesisSearchError(ValueError):
 class AnamnesisIndex:
     """Local session index with SQLite FTS5 search."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        encryption_config: DatabaseEncryptionConfig | None = None,
+        encryption_key: str | None = None,
+    ) -> None:
         self.path = path
+        self.encryption_config = encryption_config or DatabaseEncryptionConfig()
+        self._encryption_key = encryption_key
+
+    def set_encryption_config(
+        self,
+        config: DatabaseEncryptionConfig,
+        key: str | None,
+    ) -> None:
+        self.encryption_config = config
+        self._encryption_key = key
+
+    def set_encryption_key(self, key: str | None) -> None:
+        self._encryption_key = key
 
     def initialize(self) -> None:
         ensure_private_directory(self.path.parent)
@@ -276,6 +296,13 @@ class AnamnesisIndex:
         )
 
     def _connect(self) -> sqlite3.Connection:
+        if self.encryption_config.enabled:
+            if not self._encryption_key:
+                raise RuntimeError("database is encrypted and requires a decryption key")
+            conn = open_sqlcipher_connection(self.path, self._encryption_key)
+            conn.execute("PRAGMA cipher_memory_security = ON")
+            conn.execute("PRAGMA secure_delete = ON")
+            return conn
         conn = sqlite3.connect(self.path)
         conn.execute("PRAGMA secure_delete = ON")
         return conn

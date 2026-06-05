@@ -60,13 +60,21 @@ security product. Use it at your own risk, especially with legally privileged,
 regulated, personal, client, or otherwise sensitive archives.
 
 Anamnesis is designed to be conservative about discovery and authorization, but
-it still parses user-supplied files and stores searchable plaintext in local
-SQLite. Vendor export formats and local assistant storage layouts can drift
-without notice, and filesystem behavior, backups, sync tools, or copied
-database files can preserve data outside Anamnesis control. Review what you
-authorize, keep backups and workspace locations in mind, and do not treat the
-current MVP as a substitute for encryption-at-rest, formal incident response,
-or a validated e-discovery/preservation system.
+it still parses user-supplied files and stores searchable content in the local
+database. By default, this is currently plaintext SQLite with restrictive
+permissions, `secure_delete`, and compaction. Vendor export formats and local
+assistant storage layouts can drift without notice, and filesystem behavior,
+backups, sync tools, or copied database files can preserve data outside
+Anamnesis control.
+
+For stronger at-rest protection, SQLCipher encryption is available with
+`anamnesis encryption --setup` (password mode) or
+`anamnesis encryption --setup --use-keyring`. Use `--db-password` on
+encryption-dependent commands after setup when password mode is configured.
+
+Review what you authorize, keep backups and workspace locations in mind, and do
+not treat this as a substitute for formal incident response or a validated
+e-discovery/preservation system.
 
 ## Current MVP
 
@@ -113,6 +121,9 @@ python -m anamnesis privacy-audit
 python -m anamnesis privacy-audit --fix-permissions
 python -m anamnesis privacy-audit --generate-report
 python -m anamnesis debug-report
+python -m anamnesis encryption
+python -m anamnesis encryption --setup
+python -m anamnesis encryption --setup --use-keyring
 python -m anamnesis authorize "<source_id>" --auto-approve
 python -m anamnesis authorize "<source_id>" --yes
 python -m anamnesis search "auth architecture decision"
@@ -217,6 +228,10 @@ Anamnesis creates its workspace directory with `700` permissions and its local
 database and authorization manifest with `600` permissions:
 `~/.anamnesis/anamnesis.sqlite` and
 `~/.anamnesis/sources.authorization.json`.
+
+When encryption is enabled, SQLCipher protects `anamnesis.sqlite` at rest.
+Password mode requires `--db-password` per command. Keyring mode writes and
+reads a generated secret from the local OS keyring.
 
 Use `anamnesis privacy-audit` to inspect local file modes, SQLite sidecar file
 modes, and SQLite `secure_delete` status without reading indexed content. Use

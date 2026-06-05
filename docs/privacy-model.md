@@ -34,10 +34,20 @@ last_reviewed: '2026-06-05'
 
 ## Data storage
 
-- Indexed text is stored in plaintext chunks within the local `anamnesis.sqlite` database.
-- The workspace and index metadata are written with restrictive file modes by default.
+- Indexed text is stored in the local `anamnesis.sqlite` database.
+- By default, the database is plaintext and written with restrictive file modes.
+- If enabled, SQLCipher encrypts the database at rest behind `anamnesis.sqlite`.
 - SQLite `secure_delete`, periodic VACUUM, and index rebuilds are used in cleanup and purge
   flows, but not a forensic erase substitute.
+
+## Encryption-at-rest model
+
+- SQLCipher protects the primary index file from direct reads by unauthorized parties
+  when the workspace file is stolen.
+- Encryption does not protect:
+  - plaintext exports and manual input sources before indexing,
+  - plaintext tokens held in RAM during search/index operations,
+  - copies already written to backups, sync folders, or external snapshots.
 
 ## FAQ
 
@@ -53,6 +63,8 @@ folders.
   `gemini_export`, `character_ai_export`, `notion_export`.
 - Local tool-local folders that are pre-vetted by manifest policies.
 - No recursive broad-folder scans are performed without explicit authorization.
+- The user-selectable encryption mode (`anamnesis encryption --setup`) can reduce
+  at-rest exposure of indexed content.
 
 ## What the model does not guarantee
 

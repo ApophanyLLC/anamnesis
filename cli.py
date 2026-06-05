@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, is_dataclass
+from getpass import getpass
 from datetime import datetime
 import json
 from pathlib import Path
@@ -255,6 +256,17 @@ def _policy_expansion_only(old: dict[str, Any], new: dict[str, Any]) -> bool:
     return True
 
 
+def _require_database_password_interactively(service: AnamnesisService, args: Any) -> None:
+    if not service.encryption_manager.config.enabled:
+        return
+    if not service.encryption_manager.requires_user_secret():
+        return
+    password = args.db_password
+    if password is None:
+        password = getpass("Database password: ")
+    service.set_database_password(password or None)
+
+
 def _prompt_authorize_with_policy_review(
     service: AnamnesisService, source_id: str, *, auto_approve: bool
 ) -> SourceAuthorization | None:
@@ -345,6 +357,12 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Anamnesis local AI session discovery and search"
     )
     parser.add_argument(
+        "--db-password",
+        type=str,
+        default=None,
+        help="Master password for encrypted local database mode.",
+    )
+    parser.add_argument(
         "--workspace",
         type=Path,
         default=None,
@@ -399,6 +417,18 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("debug-report", help="Generate an anonymized local diagnostics report")
 
+    encryption = sub.add_parser("encryption", help="Show or initialize encrypted database mode")
+    encryption.add_argument(
+        "--setup",
+        action="store_true",
+        help="Enable SQLCipher-backed encrypted index storage.",
+    )
+    encryption.add_argument(
+        "--use-keyring",
+        action="store_true",
+        help="Generate and store the encryption key in the local keyring instead of prompting for a password.",
+    )
+
     search = sub.add_parser("search", help="Search the local index")
     search.add_argument("query")
     search.add_argument("--limit", type=int, default=10)
@@ -418,6 +448,21 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     service = AnamnesisService(workspace_root=args.workspace, home=args.home)
+    interactive_db_password_commands = {
+        "index",
+        "revoke",
+        "status",
+        "search",
+        "privacy-audit",
+        "debug-report",
+    }
+    if args.command in interactive_db_password_commands:
+        _require_database_password_interactively(service, args)
+    if args.command == "encryption" and args.setup:
+        if args.use_keyring and args.db_password:
+            print(
+                "Ignoring --db-password because --use-keyring uses OS keyring key material."
+            )
 
     try:
         if args.command == "discover":
@@ -455,6 +500,19 @@ def main(argv: list[str] | None = None) -> int:
                 _print_json(service.debug_report())
                 return 0
             _print_json(service.privacy_audit(fix_permissions=args.fix_permissions))
+            return 0
+
+        if args.command == "encryption":
+            if args.setup:
+                if args.use_keyring:
+                    _print_json(service.setup_database_encryption(use_keyring=True))
+                else:
+                    password = args.db_password
+                    if password is None:
+                        password = getpass("Set master password for encrypted database: ")
+                    _print_json(service.setup_database_encryption(password=password))
+                return 0
+            _print_json(service.database_encryption_status())
             return 0
 
         if args.command == "debug-report":
@@ -505,8 +563,14 @@ def main(argv: list[str] | None = None) -> int:
     except KeyError as exc:
         print(str(exc), file=sys.stderr)
         return 2
+    except ValueError as exc:
+        print(f"Invalid usage: {exc}", file=sys.stderr)
+        return 2
     except AnamnesisSearchError as exc:
         _print_json({"error": {"code": "invalid_search_query", "message": str(exc)}}, file=sys.stderr)
+        return 2
+    except RuntimeError as exc:
+        print(f"Runtime error: {exc}", file=sys.stderr)
         return 2
 
     parser.error(f"unknown command: {args.command}")
