@@ -670,7 +670,11 @@ class AnamnesisService:
                     ),
                 }
             )
-        return {"sources": source_rows}
+        return {
+            "sources": source_rows,
+            "search_scope_manifest": source_rows,
+            "sync_health": self.sync_health(),
+        }
 
     def sync_health(self, *, stale_after_days: int = 30) -> dict[str, Any]:
         self._configure_index_connection()

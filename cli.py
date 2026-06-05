@@ -190,6 +190,57 @@ def _print_index_reauthorization_notice(index_payload: dict[str, Any]) -> None:
         print(f"  - {source_id}: {reason}", file=sys.stderr)
 
 
+def _print_search_scope_manifest_warnings(sync_health: dict[str, Any]) -> None:
+    if not sync_health.get("has_issues"):
+        return
+    issues = sync_health.get("issues")
+    if not isinstance(issues, list):
+        return
+
+    stale_source_ids: set[str] = set()
+    schema_drift_source_ids: set[str] = set()
+    fallback_source_ids: set[str] = set()
+
+    for item in issues:
+        if not isinstance(item, dict):
+            continue
+        reason = str(item.get("reason", ""))
+        source_id = str(item.get("source_id", ""))
+        if not source_id:
+            continue
+        if reason in {"not_recent", "not_indexed"}:
+            stale_source_ids.add(source_id)
+        elif reason in {"drift_error"}:
+            schema_drift_source_ids.add(source_id)
+        elif reason == "raw_text_fallback":
+            fallback_source_ids.add(source_id)
+
+    parts: list[str] = []
+    if stale_source_ids:
+        parts.append(
+            f"{len(stale_source_ids)} source"
+            f"{'s' if len(stale_source_ids) != 1 else ''} not indexed in the last 30 days"
+        )
+    if schema_drift_source_ids:
+        parts.append(
+            f"{len(schema_drift_source_ids)} source"
+            f"{'s' if len(schema_drift_source_ids) != 1 else ''} hit schema drift"
+        )
+    if fallback_source_ids:
+        parts.append(
+            f"{len(fallback_source_ids)} source"
+            f"{'s' if len(fallback_source_ids) != 1 else ''} using fallback raw-text mode"
+        )
+
+    if not parts:
+        return
+    print("[!] Sync notice: " + "; ".join(parts) + ".", file=sys.stderr)
+    print(
+        "Run 'anamnesis status' for details and next actions.",
+        file=sys.stderr,
+    )
+
+
 def _enrich_search_results(
     results: tuple[SearchResult, ...],
     *,
@@ -568,13 +619,7 @@ def main(argv: list[str] | None = None) -> int:
                     }
                 )
             else:
-                if health["has_issues"]:
-                    issue_count = len(health["issues"])
-                    print(
-                        f"[!] Sync notice: {issue_count} source"
-                        f"{'s' if issue_count != 1 else ''} went silent. "
-                        "Run 'anamnesis status' for details."
-                    )
+                _print_search_scope_manifest_warnings(health)
                 _print_json({"results": enriched_results})
             return 0
 

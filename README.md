@@ -184,8 +184,15 @@ If any authorized source is currently blocked by a policy update, `anamnesis ind
 prints a short consent notice with the affected source IDs and the command to run
 to review and re-authorize.
 
-Run `anamnesis status` or `anamnesis search --verbose` to inspect policy-mode
-status and any `ignored_files_due_to_policy_restriction` counters.
+`anamnesis status` prints a search-scope manifest for each discovered source with:
+
+- `last_indexed_at`
+- `status` (`success`, `parse_error`, `drift_error`, `not_authorized`, `not_indexed`)
+- `parser_mode` (`structured`, `fallback_text`, `failed`)
+
+Run `anamnesis status` or `anamnesis search --verbose` for full diagnostics.
+Default `search` output keeps results first, with a compact sync notice only if sources
+are silent, schema-drifted, or running in fallback raw-text mode.
 
 Search output now includes parser-mode labels per result:
 
