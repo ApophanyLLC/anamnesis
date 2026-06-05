@@ -547,6 +547,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("status", help="Show per-source indexing health")
 
+    web = sub.add_parser("web", help="Launch a local search UI in a web browser")
+    web.add_argument("--host", type=str, default="127.0.0.1")
+    web.add_argument("--port", type=int, default=8765)
+    web.add_argument(
+        "--open",
+        action="store_true",
+        help="Open the web UI in a browser automatically",
+    )
+
     sub.add_parser("versions", help="Show version information")
     return parser
 
@@ -562,6 +571,7 @@ def main(argv: list[str] | None = None) -> int:
         "search",
         "privacy-audit",
         "debug-report",
+        "web",
     }
     if args.command in interactive_db_password_commands:
         _require_database_password_interactively(service, args)
@@ -669,6 +679,12 @@ def main(argv: list[str] | None = None) -> int:
                     "python_executable": sys.executable,
                 }
             )
+            return 0
+
+        if args.command == "web":
+            from .web_ui import run_web_ui
+
+            run_web_ui(service, host=args.host, port=args.port, open_browser=args.open)
             return 0
 
     except KeyError as exc:

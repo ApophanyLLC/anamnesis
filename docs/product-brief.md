@@ -67,9 +67,8 @@ The current snapshot is an initial local MVP. It provides:
 - A governed source registry with policy snapshot identifiers so authorization
   binds to the source policy that was discovered.
 
-This snapshot does not yet provide vector search, local embeddings, synthesis,
-a web UI, an IDE extension, or team knowledge bases. Those remain roadmap
-concepts.
+This snapshot does not yet provide vector search, local embeddings, synthesis, or
+team knowledge bases. Those remain roadmap concepts.
 
 It should be treated as experimental software. Users should assume YMMV for
 unsupported assistant formats, changing vendor exports, unusual local storage
@@ -177,8 +176,8 @@ Source ecosystem:
 Interfaces:
 
 - CLI remains the durable operator surface.
-- A local web UI may support browsing, triage, and search result review.
-- IDE integration can surface relevant prior session context near current work,
+- A local web UI now provides optional browsing and triage for search output.
+- IDE integration is a future extension direction for context-aware retrieval near current work,
   but should not weaken local-first privacy assumptions.
 
 ## Risks

@@ -130,6 +130,7 @@ python -m anamnesis authorize "<source_id>" --auto-approve
 python -m anamnesis authorize "<source_id>" --yes
 python -m anamnesis search "auth architecture decision"
 python -m anamnesis search "auth architecture decision" --verbose
+python -m anamnesis web --open
 python -m anamnesis authorize "<source_id>"  # re-checks policy diffs on drift and offers legacy mode
 python -m anamnesis revoke "<source_id>"
 ```
@@ -203,6 +204,14 @@ Search output now includes parser-mode labels per result:
 
 - `Structured Chat` for structured parser mode
 - `Raw Text Source` when parsing fell back to raw text
+
+Optional local UX layers:
+
+- `python -m anamnesis web [--host 127.0.0.1] [--port 8765] [--open]`
+  serves a tiny local browser UI for quick browsing of search results.
+- See [`docs/web-ui.md`](docs/web-ui.md) for endpoint behavior and usage notes.
+- IDE integration is tracked as a roadmap/optional surface in
+  [`docs/ide-extensions.md`](docs/ide-extensions.md).
 
 When source indexing is stale or impaired, `search` prints a one-line sync notice
 and `status` exposes source-level `sync_warnings` with date-skew or parse-staleness

@@ -30,6 +30,12 @@
     to avoid loading entire multi-GB payloads before normalization,
   - added runtime adapter extension points via `ANAMNESIS_ADAPTER_MODULES` so
     vendor format support can be introduced as external modules.
+- Added an optional local web search surface:
+  - `python -m anamnesis web` starts a localhost HTTP UI for result review.
+  - `/api/search`, `/api/health`, and `/api/status` endpoints expose local search
+    and diagnostics data for browser clients.
+- Added optional IDE extension design notes in `docs/ide-extensions.md` and a web UI
+  usage guide in `docs/web-ui.md` to support Phase 5 polish direction.
 
 ## 2026-06-04
 
