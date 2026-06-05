@@ -113,6 +113,8 @@ python -m anamnesis privacy-audit
 python -m anamnesis privacy-audit --fix-permissions
 python -m anamnesis privacy-audit --generate-report
 python -m anamnesis debug-report
+python -m anamnesis authorize "<source_id>" --auto-approve
+python -m anamnesis authorize "<source_id>" --yes
 python -m anamnesis search "auth architecture decision"
 python -m anamnesis search "auth architecture decision" --verbose
 python -m anamnesis authorize "<source_id>"  # re-checks policy diffs on drift and offers legacy mode
@@ -135,6 +137,13 @@ explicit user choice with a safe default that cancels on Enter:
 - `[1]` / `y` accept the new policy (applies full current policy),
 - `[2]` keep legacy restrictions (indexes only previously-allowed files),
 - `[3]` / Enter / `n` cancel.
+
+For scripted runs, use:
+
+- `--auto-approve` (or `--yes`) to bypass interactive gating and accept expanded
+  policies automatically.
+- `--auto-approve` must be explicit and is intended for non-interactive
+  automation only.
 
 Run `anamnesis status` or `anamnesis search --verbose` to inspect policy-mode
 status and any `ignored_files_due_to_policy_restriction` counters.

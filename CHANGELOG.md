@@ -11,6 +11,10 @@
 - Tightened re-authorization UX so policy changes are never auto-accepted:
   prompts now require explicit opt-in (default abort on Enter) and support
   explicit y/yes acceptance input.
+- Implemented proportional re-authorization friction:
+  boundary-expanding policy updates still require confirmation; non-boundary
+  policy drift updates now refresh authorization silently, and `authorize` now
+  supports explicit `--auto-approve` / `--yes` for scripted non-interactive runs.
 - Added per-source tracking of ignored files when legacy mode is selected and surfaced it via `status` and verbose search diagnostics.
 - Added `debug-report` command and `privacy-audit --generate-report` to emit anonymized local diagnostics for user feedback without content.
 - Added source-level cumulative error counters in the index manifest (`error_count` + `error_summary`) for local issue pattern tracking.

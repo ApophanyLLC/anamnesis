@@ -62,13 +62,45 @@ def _policy_escalation_detected(old: dict[str, Any], new: dict[str, Any]) -> boo
         str(old.get("risk_level", "")), 0
     ):
         return True
+    old_shapes = sorted(str(value) for value in old.get("accepted_file_shapes", ()))
+    new_shapes = sorted(str(value) for value in new.get("accepted_file_shapes", ()))
+    if len(set(new_shapes) - set(old_shapes)) > 0:
+        return True
     old_suffixes = sorted(str(value) for value in old.get("file_suffixes", ()))
     new_suffixes = sorted(str(value) for value in new.get("file_suffixes", ()))
-    return len(set(new_suffixes) - set(old_suffixes)) > 0
+    if len(set(new_suffixes) - set(old_suffixes)) > 0:
+        return True
+
+    boundary_keys = {
+        "local_path_format",
+        "access_method",
+        "storage_model",
+        "default_discovery_policy",
+    }
+    return any(old.get(key) != new.get(key) for key in boundary_keys)
+
+
+def _policy_expansion_only(old: dict[str, Any], new: dict[str, Any]) -> bool:
+    if _policy_escalation_detected(old, new):
+        return False
+    non_expansive_keys = {
+        "drift_warning",
+        "default_discovery_policy",
+        "notes",
+        "parser_owner",
+        "display_name",
+        "source_type",
+    }
+    for key in old.keys() | new.keys():
+        if key in non_expansive_keys:
+            continue
+        if old.get(key) != new.get(key):
+            return False
+    return True
 
 
 def _prompt_authorize_with_policy_review(
-    service: AnamnesisService, source_id: str
+    service: AnamnesisService, source_id: str, *, auto_approve: bool
 ) -> SourceAuthorization | None:
     source = next(
         (item for item in service.discover() if item.source_id == source_id), None
@@ -92,6 +124,14 @@ def _prompt_authorize_with_policy_review(
     ):
         return authorization
 
+    if _policy_expansion_only(authorization.policy_snapshot, current_snapshot):
+        return service.authorize(
+            source_id,
+            policy_snapshot=current_snapshot,
+            policy_mode="current",
+            policy_id=current_policy_id,
+        )
+
     print(f"Policy update for {source.display_name}:")
     policy_diff_lines = _policy_diff_lines(authorization.policy_snapshot, current_snapshot)
     if policy_diff_lines:
@@ -100,6 +140,15 @@ def _prompt_authorize_with_policy_review(
     else:
         print("-   <no diff in tracked policy fields>")
     escalation = _policy_escalation_detected(authorization.policy_snapshot, current_snapshot)
+    if auto_approve and escalation:
+        print("Auto-approve enabled: accepting expanded policy update.")
+        return service.authorize(
+            source_id,
+            policy_snapshot=current_snapshot,
+            policy_mode="current",
+            policy_id=current_policy_id,
+        )
+
     while True:
         selected = (
             input(
@@ -157,6 +206,16 @@ def _build_parser() -> argparse.ArgumentParser:
 
     authorize = sub.add_parser("authorize", help="Authorize a discovered source")
     authorize.add_argument("source_id")
+    authorize.add_argument(
+        "--auto-approve",
+        action="store_true",
+        help="Automatically accept policy updates without interactive prompts.",
+    )
+    authorize.add_argument(
+        "--yes",
+        action="store_true",
+        help="Alias for --auto-approve to support scripted non-interactive runs.",
+    )
 
     revoke = sub.add_parser("revoke", help="Revoke and purge a source")
     revoke.add_argument("source_id")
@@ -205,7 +264,11 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "authorize":
-            authorization = _prompt_authorize_with_policy_review(service, args.source_id)
+            authorization = _prompt_authorize_with_policy_review(
+                service,
+                args.source_id,
+                auto_approve=args.auto_approve or args.yes,
+            )
             if authorization is None:
                 return 2
             _print_json({"authorization": authorization})
