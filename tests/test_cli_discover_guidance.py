@@ -45,3 +45,34 @@ def test_discover_includes_manual_import_tour(tmp_path: Path) -> None:
     first_run_tour = payload["first_run_tour"]  # type: ignore[assignment]
     assert len(first_run_tour) >= 3  # type: ignore[arg-type]
     assert "copy exports into path" in first_run_tour[1]  # type: ignore[index]
+    assert any(
+        "Only narrow, product-owned discovery paths" in str(item)
+        for item in first_run_tour  # type: ignore[union-attr]
+    )
+
+    privacy_model = payload["privacy_model"]  # type: ignore[assignment]
+    assert privacy_model["reads_only_authorized_content"] is True  # type: ignore[index]
+    assert privacy_model["doc"] == "docs/privacy-model.md"  # type: ignore[index]
+
+    persona_modes = payload["persona_modes"]  # type: ignore[assignment]
+    assert len(persona_modes) == 3  # type: ignore[arg-type]
+    assert {  # type: ignore[union-attr]
+        persona["id"] for persona in persona_modes
+    } == {"liberated", "anxious", "minimalist"}
+
+
+def test_discover_quiet_mode_suppresses_guidance(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    completed = subprocess.run(
+        [sys.executable, "-m", "anamnesis", "discover", "--home", str(home), "--quiet"],
+        capture_output=True,
+        cwd=REPO_ROOT,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0
+    payload = json.loads(completed.stdout)
+
+    assert payload["first_run_tour"] == []  # type: ignore[index]
+    assert payload["persona_modes"] == []  # type: ignore[index]
+    assert payload["privacy_model"] == {}  # type: ignore[index]

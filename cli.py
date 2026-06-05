@@ -82,7 +82,9 @@ def _manual_import_entry(source: Any) -> dict[str, Any]:
     }
 
 
-def _build_discover_tour(sources: tuple[Any, ...]) -> dict[str, Any]:
+def _build_discover_tour(
+    sources: tuple[Any, ...], *, include_guidance: bool = True
+) -> dict[str, Any]:
     manual_import_sources = [
         source
         for source in sources
@@ -99,16 +101,60 @@ def _build_discover_tour(sources: tuple[Any, ...]) -> dict[str, Any]:
             has_authorized_source = True
             break
     tutorial = [
-        "Cloud products are manual-only in this release.",
+        "Anamnesis intentionally reads only narrow, product-owned discovery paths so it can’t silently crawl "
+        "Downloads or Documents folders and index unrelated sensitive files.",
+        "Cloud products are manual-only in this release: copy exports into explicit folders like "
+        "~/Anamnesis/imports/<product> (or ~/Anamnesis/chatgpt_exports) before authorization.",
+        "Cloud products are manual-only in this release. "
+        "To index them, export data from the vendor UI and place files in the listed import paths.",
         "For each source below, run: copy exports into path -> authorize -> index.",
         "When exports are ready, run `anamnesis authorize <source_id>` for each source.",
         "After authorization, run `anamnesis index` to ingest content.",
     ]
+    persona_modes = [
+        {
+            "label": "Liberated User",
+            "id": "liberated",
+            "description": "Use discover output plus `anamnesis privacy-audit` to verify what gets read.",
+        },
+        {
+            "label": "Anxious User",
+            "id": "anxious",
+            "description": "Use `anamnesis discover --quiet` for minimal onboarding chatter.",
+        },
+        {
+            "label": "Minimalist User",
+            "id": "minimalist",
+            "description": "Use `--auto-approve`/`--yes` where policy updates are non-expansive.",
+        },
+    ]
+    privacy_model = {
+        "reads_only_authorized_content": True,
+        "does_not_read": (
+            "plugins, settings, extension configs, unrelated files outside discovered source paths"
+        ),
+        "storage": "searchable plaintext in local SQLite + restrictive permissions",
+        "limits": [
+            "Backups, sidecars, cloud syncs, and external snapshots can retain previous plaintext.",
+            "It is not a forensic guarantee.",
+        ],
+        "manual_export_sources": (
+            "chatgpt_export",
+            "claude",
+            "gemini_export",
+            "character_ai_export",
+            "notion_export",
+        ),
+        "doc": "docs/privacy-model.md",
+    }
     if has_authorized_source:
-        tutorial = tutorial[1:]
+        tutorial = tutorial[2:]
+        privacy_model["status"] = "authorized_session_active"
     return {
         "manual_import_paths": manual_import_paths,
-        "first_run_tour": tutorial,
+        "first_run_tour": tutorial if include_guidance else [],
+        "persona_modes": persona_modes if include_guidance else [],
+        "privacy_model": privacy_model if include_guidance else {},
     }
 
 
@@ -312,7 +358,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("discover", help="Inventory known AI session sources")
+    discover = sub.add_parser("discover", help="Inventory known AI session sources")
+    discover.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Reduce first-run guidance in discover output.",
+    )
 
     authorize = sub.add_parser("authorize", help="Authorize a discovered source")
     authorize.add_argument("source_id")
@@ -374,7 +425,7 @@ def main(argv: list[str] | None = None) -> int:
             _print_json(
                 {
                     "sources": sources,
-                    **_build_discover_tour(sources),
+                    **_build_discover_tour(sources, include_guidance=not args.quiet),
                 }
             )
             return 0

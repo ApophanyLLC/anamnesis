@@ -147,6 +147,13 @@ python -m anamnesis index
 
 See [`docs/manual-export-guidance.md`](docs/manual-export-guidance.md) for the
 current setup model and manual import workflow notes.
+See [`docs/privacy-model.md`](docs/privacy-model.md) for the privacy boundary rationale.
+
+- `persona_modes`: optional onboarding profiles for different privacy/automation
+  comfort levels.
+- `privacy_model`: a concise privacy boundary snapshot and doc pointer included with
+  discover output.
+- `--quiet`: suppress onboarding guidance in discover output while keeping machine-readable metadata.
 
 When a source policy changes, `authorize` prints a terminal diff and requires
 explicit user choice with a safe default that cancels on Enter:
