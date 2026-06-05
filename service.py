@@ -209,6 +209,9 @@ class AnamnesisService:
             source_sync_warnings: list[str] = []
             if source_definition is None:
                 reason = f"unknown_source_definition: {authorization.source_type}"
+                source_sync_warnings.append(
+                    self._policy_consent_warning(authorization.source_id)
+                )
                 source_error_diagnostics.append(
                     {
                         "source_id": authorization.source_id,
@@ -266,6 +269,9 @@ class AnamnesisService:
                         source_error_summary = self._increment_error_summary(
                             source_error_summary, "policy_drift"
                         )
+                        source_sync_warnings.append(
+                            self._policy_consent_warning(authorization.source_id)
+                        )
                         self._persist_source_status(
                             authorization=authorization,
                             now_iso=now_iso,
@@ -293,6 +299,9 @@ class AnamnesisService:
                         source_error_summary = self._increment_error_summary(
                             source_error_summary, "policy_drift"
                         )
+                        source_sync_warnings.append(
+                            self._policy_consent_warning(authorization.source_id)
+                        )
                         self._persist_source_status(
                             authorization=authorization,
                             now_iso=now_iso,
@@ -319,6 +328,9 @@ class AnamnesisService:
                 )
                 source_error_summary = self._increment_error_summary(
                     source_error_summary, "policy_drift"
+                )
+                source_sync_warnings.append(
+                    self._policy_consent_warning(authorization.source_id)
                 )
                 self._persist_source_status(
                     authorization=authorization,
@@ -539,6 +551,12 @@ class AnamnesisService:
     def _increment_error_summary(self, summary: dict[str, int], key: str) -> dict[str, int]:
         summary[key] = summary.get(key, 0) + 1
         return summary
+
+    def _policy_consent_warning(self, source_id: str) -> str:
+        return (
+            f"Indexing for '{source_id}' is paused because its policy boundary changed. "
+            "Run `authorize` for this source to review changes before indexing can continue."
+        )
 
     def _merge_error_summary(
         self, base: dict[str, int], added: dict[str, int]

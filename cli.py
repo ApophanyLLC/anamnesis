@@ -159,6 +159,37 @@ def _build_discover_tour(
     }
 
 
+def _print_index_reauthorization_notice(index_payload: dict[str, Any]) -> None:
+    diagnostics = index_payload.get("source_error_diagnostics")
+    if not isinstance(diagnostics, list):
+        return
+    blocked_sources: list[tuple[str, str]] = []
+    for item in diagnostics:
+        if not isinstance(item, dict):
+            continue
+        source_id = str(item.get("source_id", ""))
+        reason = str(item.get("reason", ""))
+        if "source_policy_drift" in reason or reason.startswith(
+            "unknown_source_definition:"
+        ):
+            if source_id:
+                blocked_sources.append((source_id, reason))
+    if not blocked_sources:
+        return
+    count = len(blocked_sources)
+    print(
+        f"[!] Consent notice: {count} source"
+        f"{'s' if count != 1 else ''} paused for policy review.",
+        file=sys.stderr,
+    )
+    print(
+        "Run authorize for each listed source to continue: `anamnesis authorize <source_id>`.",
+        file=sys.stderr,
+    )
+    for source_id, reason in blocked_sources:
+        print(f"  - {source_id}: {reason}", file=sys.stderr)
+
+
 def _enrich_search_results(
     results: tuple[SearchResult, ...],
     *,
@@ -492,7 +523,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "index":
-            _print_json(service.index_authorized_sources())
+            index_result = service.index_authorized_sources()
+            _print_index_reauthorization_notice(index_result)
+            _print_json(index_result)
             return 0
 
         if args.command == "privacy-audit":

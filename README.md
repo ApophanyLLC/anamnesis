@@ -180,6 +180,10 @@ For scripted runs, use:
 - `--auto-approve` must be explicit and is intended for non-interactive
   automation only.
 
+If any authorized source is currently blocked by a policy update, `anamnesis index`
+prints a short consent notice with the affected source IDs and the command to run
+to review and re-authorize.
+
 Run `anamnesis status` or `anamnesis search --verbose` to inspect policy-mode
 status and any `ignored_files_due_to_policy_restriction` counters.
 
