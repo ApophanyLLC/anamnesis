@@ -166,6 +166,13 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Repair workspace/database/authorization file modes without reading content.",
     )
+    privacy_audit.add_argument(
+        "--generate-report",
+        action="store_true",
+        help="Print a privacy-safe diagnostic summary for issue sharing.",
+    )
+
+    sub.add_parser("debug-report", help="Generate an anonymized local diagnostics report")
 
     search = sub.add_parser("search", help="Search the local index")
     search.add_argument("query")
@@ -209,9 +216,14 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "privacy-audit":
-            _print_json(
-                service.privacy_audit(fix_permissions=args.fix_permissions)
-            )
+            if args.generate_report:
+                _print_json(service.debug_report())
+                return 0
+            _print_json(service.privacy_audit(fix_permissions=args.fix_permissions))
+            return 0
+
+        if args.command == "debug-report":
+            _print_json(service.debug_report())
             return 0
 
         if args.command == "search":

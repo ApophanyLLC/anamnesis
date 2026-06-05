@@ -84,19 +84,39 @@ class AnamnesisService:
         source_error_diagnostics: list[dict[str, str]] = []
         source_definitions_by_type = definitions_by_source_type()
         source_definitions_by_id = definitions_by_definition_id()
+        existing_statuses_by_id = {
+            status.source_id: status for status in self.index.source_statuses()
+        }
         needs_compaction = False
         for authorization in self.authorization_store.authorized_sources():
             counts["sources"] += 1
+            now_iso = _now_utc_iso()
             source_definition = source_definitions_by_type.get(
                 authorization.source_type
             )
+            source_error_summary = self._empty_error_summary()
             if source_definition is None:
+                reason = f"unknown_source_definition: {authorization.source_type}"
                 source_error_diagnostics.append(
                     {
                         "source_id": authorization.source_id,
                         "path": str(authorization.path),
-                        "reason": f"unknown_source_definition: {authorization.source_type}",
+                        "reason": reason,
                     }
+                )
+                source_error_summary = self._increment_error_summary(
+                    source_error_summary,
+                    "policy_drift",
+                )
+                self._persist_source_status(
+                    authorization=authorization,
+                    now_iso=now_iso,
+                    source_last_status="drift_error",
+                    source_drift_detected=True,
+                    source_parser_mode="failed",
+                    source_error_summary=source_error_summary,
+                    statuses_by_id=existing_statuses_by_id,
+                    ignored_files_due_to_policy_restriction=0,
                 )
                 continue
 
@@ -119,28 +139,56 @@ class AnamnesisService:
                 if policy_id:
                     registered_definition = source_definitions_by_id.get(policy_id)
                     if registered_definition is None:
+                        reason = (
+                            "source_policy_drift: "
+                            f"unknown_definition_id={policy_id}"
+                        )
                         source_error_diagnostics.append(
-                    {
-                        "source_id": authorization.source_id,
-                        "path": str(authorization.path),
-                        "reason": (
-                                    "source_policy_drift: "
-                                    f"unknown_definition_id={policy_id}"
-                                ),
-                        }
-                    )
+                            {
+                                "source_id": authorization.source_id,
+                                "path": str(authorization.path),
+                                "reason": reason,
+                            }
+                        )
+                        source_error_summary = self._increment_error_summary(
+                            source_error_summary, "policy_drift"
+                        )
+                        self._persist_source_status(
+                            authorization=authorization,
+                            now_iso=now_iso,
+                            source_last_status="drift_error",
+                            source_drift_detected=True,
+                            source_parser_mode="failed",
+                            source_error_summary=source_error_summary,
+                            statuses_by_id=existing_statuses_by_id,
+                            ignored_files_due_to_policy_restriction=0,
+                        )
                         continue
                     if registered_definition.definition_id != source_definition.definition_id:
+                        reason = (
+                            "source_policy_drift: "
+                            f"unknown_definition_id={policy_id}"
+                        )
                         source_error_diagnostics.append(
-                    {
-                        "source_id": authorization.source_id,
-                        "path": str(authorization.path),
-                        "reason": (
-                                    "source_policy_drift: "
-                                    f"unknown_definition_id={policy_id}"
-                                ),
-                        }
-                    )
+                            {
+                                "source_id": authorization.source_id,
+                                "path": str(authorization.path),
+                                "reason": reason,
+                            }
+                        )
+                        source_error_summary = self._increment_error_summary(
+                            source_error_summary, "policy_drift"
+                        )
+                        self._persist_source_status(
+                            authorization=authorization,
+                            now_iso=now_iso,
+                            source_last_status="drift_error",
+                            source_drift_detected=True,
+                            source_parser_mode="failed",
+                            source_error_summary=source_error_summary,
+                            statuses_by_id=existing_statuses_by_id,
+                            ignored_files_due_to_policy_restriction=0,
+                        )
                         continue
                 effective_file_suffixes = self._suffixes_from_snapshot(
                     policy_snapshot_for_definition(source_definition).get("file_suffixes", ())
@@ -153,6 +201,19 @@ class AnamnesisService:
                         "path": str(authorization.path),
                         "reason": "source_policy_snapshot_invalid: file_suffixes missing",
                     }
+                )
+                source_error_summary = self._increment_error_summary(
+                    source_error_summary, "policy_drift"
+                )
+                self._persist_source_status(
+                    authorization=authorization,
+                    now_iso=now_iso,
+                    source_last_status="drift_error",
+                    source_drift_detected=True,
+                    source_parser_mode="failed",
+                    source_error_summary=source_error_summary,
+                    statuses_by_id=existing_statuses_by_id,
+                    ignored_files_due_to_policy_restriction=0,
                 )
                 continue
 
@@ -176,6 +237,13 @@ class AnamnesisService:
                     if exc.reason.startswith("schema_drift:"):
                         source_last_status = "drift_error"
                         source_drift_detected = True
+                        source_error_summary = self._increment_error_summary(
+                            source_error_summary, "schema_drift"
+                        )
+                    else:
+                        source_error_summary = self._increment_error_summary(
+                            source_error_summary, "parse_errors"
+                        )
                     skipped_file_diagnostics.append(
                         {"path": str(exc.path), "reason": exc.reason}
                     )
@@ -186,9 +254,15 @@ class AnamnesisService:
                     skipped_file_diagnostics.append(
                         {"path": str(path), "reason": type(exc).__name__}
                     )
+                    source_error_summary = self._increment_error_summary(
+                        source_error_summary, "parse_errors"
+                    )
                     continue
                 except Exception as exc:
                     source_last_status = "parse_error"
+                    source_error_summary = self._increment_error_summary(
+                        source_error_summary, "parse_errors"
+                    )
                     source_error_diagnostics.append(
                         {
                             "source_id": authorization.source_id,
@@ -210,23 +284,41 @@ class AnamnesisService:
                     "failed" if source_last_status != "success" else source_parser_mode
                 )
                 try:
-                    self.index.update_source_status(
+                    self._persist_source_status(
                         authorization,
-                        last_index_status=source_last_status,
-                        drift_detected=source_drift_detected,
-                        parser_mode=effective_mode,
+                        now_iso=now_iso,
+                        source_last_status=source_last_status,
+                        source_drift_detected=source_drift_detected,
+                        source_parser_mode=effective_mode,
+                        source_error_summary=source_error_summary,
+                        statuses_by_id=existing_statuses_by_id,
                         ignored_files_due_to_policy_restriction=(
                             ignored_files_due_to_policy_restriction
                         ),
-                        last_indexed_at=now_iso,
                     )
                 except sqlite3.Error as exc:
+                    source_error_summary = self._increment_error_summary(
+                        source_error_summary,
+                        "other_errors",
+                    )
                     source_error_diagnostics.append(
                         {
                             "source_id": authorization.source_id,
                             "path": str(authorization.path),
                             "reason": f"index_write_error: {type(exc).__name__}: {exc}",
                         }
+                    )
+                    self._persist_source_status(
+                        authorization=authorization,
+                        now_iso=now_iso,
+                        source_last_status="parse_error",
+                        source_drift_detected=source_drift_detected,
+                        source_parser_mode="failed",
+                        source_error_summary=source_error_summary,
+                        statuses_by_id=existing_statuses_by_id,
+                        ignored_files_due_to_policy_restriction=(
+                            ignored_files_due_to_policy_restriction
+                        ),
                     )
                 continue
             documents_tuple = tuple(source_documents)
@@ -241,9 +333,15 @@ class AnamnesisService:
                     ignored_files_due_to_policy_restriction=(
                         ignored_files_due_to_policy_restriction
                     ),
+                    error_count=self._sum_error_summary(source_error_summary),
+                    error_summary=source_error_summary,
                     last_indexed_at=now_iso,
                 )
             except sqlite3.Error as exc:
+                source_last_status = "parse_error"
+                source_error_summary = self._increment_error_summary(
+                    source_error_summary, "other_errors"
+                )
                 source_error_diagnostics.append(
                     {
                         "source_id": authorization.source_id,
@@ -251,9 +349,29 @@ class AnamnesisService:
                         "reason": f"index_write_error: {type(exc).__name__}: {exc}",
                     }
                 )
+                self._persist_source_status(
+                    authorization=authorization,
+                    now_iso=now_iso,
+                    source_last_status=source_last_status,
+                    source_drift_detected=source_drift_detected,
+                    source_parser_mode="failed",
+                    source_error_summary=source_error_summary,
+                    statuses_by_id=existing_statuses_by_id,
+                    ignored_files_due_to_policy_restriction=ignored_files_due_to_policy_restriction,
+                )
                 continue
             counts["documents"] += len(documents_tuple)
             counts["chunks"] += replaced_chunks
+            self._persist_source_status(
+                authorization=authorization,
+                now_iso=now_iso,
+                source_last_status=source_last_status,
+                source_drift_detected=source_drift_detected,
+                source_parser_mode=source_parser_mode,
+                source_error_summary=source_error_summary,
+                statuses_by_id=existing_statuses_by_id,
+                ignored_files_due_to_policy_restriction=ignored_files_due_to_policy_restriction,
+            )
             needs_compaction = True
         if needs_compaction:
             self.index.vacuum()
@@ -264,6 +382,55 @@ class AnamnesisService:
             counts["source_errors"] = len(source_error_diagnostics)
             counts["source_error_diagnostics"] = source_error_diagnostics
         return counts
+
+    def _empty_error_summary(self) -> dict[str, int]:
+        return {"parse_errors": 0, "schema_drift": 0, "policy_drift": 0, "other_errors": 0}
+
+    def _increment_error_summary(self, summary: dict[str, int], key: str) -> dict[str, int]:
+        summary[key] = summary.get(key, 0) + 1
+        return summary
+
+    def _merge_error_summary(
+        self, base: dict[str, int], added: dict[str, int]
+    ) -> dict[str, int]:
+        merged = dict(base)
+        for key, value in added.items():
+            merged[key] = merged.get(key, 0) + value
+        return merged
+
+    def _sum_error_summary(self, summary: dict[str, int]) -> int:
+        return sum(summary.values())
+
+    def _persist_source_status(
+        self,
+        *,
+        authorization: SourceAuthorization,
+        now_iso: str,
+        source_last_status: str,
+        source_drift_detected: bool,
+        source_parser_mode: str,
+        source_error_summary: dict[str, int],
+        statuses_by_id: dict[str, SourceIndexStatus],
+        ignored_files_due_to_policy_restriction: int,
+    ) -> None:
+        existing_status = statuses_by_id.get(authorization.source_id)
+        prior_summary = (
+            existing_status.error_summary if existing_status is not None else {}
+        )
+        prior_count = existing_status.error_count if existing_status is not None else 0
+        merged_summary = self._merge_error_summary(prior_summary, source_error_summary)
+        self.index.update_source_status(
+            authorization,
+            last_index_status=source_last_status,
+            drift_detected=source_drift_detected,
+            parser_mode=source_parser_mode,
+            ignored_files_due_to_policy_restriction=(
+                ignored_files_due_to_policy_restriction
+            ),
+            error_count=prior_count + self._sum_error_summary(source_error_summary),
+            error_summary=merged_summary,
+            last_indexed_at=now_iso,
+        )
 
     def status(self) -> dict[str, Any]:
         statuses_by_id = {
@@ -315,6 +482,8 @@ class AnamnesisService:
                     "parser_mode": parser_mode,
                     "drift_detected": drift_detected,
                     "ignored_files_due_to_policy_restriction": ignored_files_due_to_policy_restriction,
+                    "error_count": status.error_count if status else 0,
+                    "error_summary": status.error_summary if status else {},
                     "policy_id": policy_id,
                     "policy_mode": policy_mode,
                     "policy_snapshot": policy_snapshot,
@@ -410,6 +579,69 @@ class AnamnesisService:
         return self.index.search(query, limit=limit)
 
     def privacy_audit(self, *, fix_permissions: bool = False) -> dict[str, Any]:
+        return self._collect_privacy_audit(fix_permissions=fix_permissions)
+
+    def debug_report(self) -> dict[str, Any]:
+        privacy_audit = self._collect_privacy_audit()
+        status_payload = self.status()
+        source_status_rows = []
+        total_error_summary: dict[str, int] = self._empty_error_summary()
+        for item in status_payload["sources"]:
+            summary = item.get("error_summary", {})
+            source_row_error_summary = self._merge_error_summary(self._empty_error_summary(), summary)
+            source_status_rows.append(
+                {
+                    "source_id": item["source_id"],
+                    "source_type": item["source_type"],
+                    "status": item["status"],
+                    "last_indexed_at": item["last_indexed_at"],
+                    "parser_mode": item["parser_mode"],
+                    "drift_detected": item["drift_detected"],
+                    "ignored_files_due_to_policy_restriction": item["ignored_files_due_to_policy_restriction"],
+                    "error_summary": source_row_error_summary,
+                    "error_count": item["error_count"],
+                }
+            )
+            total_error_summary = self._merge_error_summary(
+                total_error_summary,
+                source_row_error_summary,
+            )
+        indexed_counts = self.index.indexed_counts()
+        return {
+            "generated_at": _now_utc_iso(),
+            "workspace": str(self.workspace_root),
+            "configuration_overview": {
+                "sources_discovered": len(status_payload["sources"]),
+                "sources_authorized": len(
+                    [
+                        source
+                        for source in self.authorization_store.authorized_sources()
+                    ]
+                ),
+                "index_sources": indexed_counts["sources"],
+                "documents": indexed_counts["documents"],
+                "chunks": indexed_counts["chunks"],
+            },
+            "error_counts": {
+                "total": sum(total_error_summary.values()),
+                "by_type": total_error_summary,
+            },
+            "source_status_summary": source_status_rows,
+            "privacy_posture": {
+                "ok": privacy_audit["ok"],
+                "failed_checks": [
+                    {key: item[key] for key in ("id", "ok") if key in item}
+                    for item in privacy_audit["checks"]
+                ],
+            },
+            "warnings": len(privacy_audit["warnings"]),
+            "recommendation": (
+                "Share this report in a GitHub issue/discussion after removing "
+                "any local paths you want to keep private."
+            ),
+        }
+
+    def _collect_privacy_audit(self, *, fix_permissions: bool = False) -> dict[str, Any]:
         checks: list[dict[str, Any]] = []
         warnings: list[dict[str, str]] = []
         fixed: list[dict[str, str]] = []

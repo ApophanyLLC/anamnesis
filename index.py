@@ -35,7 +35,9 @@ class AnamnesisIndex:
                     last_index_status TEXT,
                     drift_detected INTEGER NOT NULL DEFAULT 0,
                     parser_mode TEXT,
-                    ignored_files_due_to_policy_restriction INTEGER NOT NULL DEFAULT 0
+                    ignored_files_due_to_policy_restriction INTEGER NOT NULL DEFAULT 0,
+                    error_count INTEGER NOT NULL DEFAULT 0,
+                    error_summary_json TEXT NOT NULL DEFAULT '{}'
                 );
                 CREATE TABLE IF NOT EXISTS sessions (
                     session_id TEXT NOT NULL,
@@ -65,6 +67,18 @@ class AnamnesisIndex:
             self._ensure_sources_columns(conn)
         ensure_private_file(self.path)
 
+    def indexed_counts(self) -> dict[str, int]:
+        self.initialize()
+        with self._connect() as conn:
+            source_row = conn.execute("SELECT COUNT(*) FROM sources").fetchone()
+            session_row = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()
+            chunk_row = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()
+        return {
+            "sources": int(source_row[0] or 0),
+            "documents": int(session_row[0] or 0),
+            "chunks": int(chunk_row[0] or 0),
+        }
+
     def upsert_documents(self, documents: tuple[SessionDocument, ...]) -> int:
         self.initialize()
         indexed_chunks = 0
@@ -84,6 +98,8 @@ class AnamnesisIndex:
         drift_detected: bool = False,
         parser_mode: str = "structured",
         ignored_files_due_to_policy_restriction: int = 0,
+        error_count: int = 0,
+        error_summary: dict[str, int] | None = None,
         last_indexed_at: str | None = None,
     ) -> int:
         """Atomically replace one source's active index after parsing succeeds.
@@ -111,6 +127,8 @@ class AnamnesisIndex:
                 drift_detected=drift_detected,
                 parser_mode=parser_mode,
                 ignored_files_due_to_policy_restriction=ignored_files_due_to_policy_restriction,
+                error_count=error_count,
+                error_summary=error_summary,
                 last_indexed_at=last_indexed_at,
             )
             for document in documents:
@@ -135,6 +153,8 @@ class AnamnesisIndex:
         drift_detected: bool,
         parser_mode: str,
         ignored_files_due_to_policy_restriction: int = 0,
+        error_count: int = 0,
+        error_summary: dict[str, int] | None = None,
         last_indexed_at: str | None = None,
     ) -> None:
         self.initialize()
@@ -146,6 +166,8 @@ class AnamnesisIndex:
                 drift_detected=drift_detected,
                 parser_mode=parser_mode,
                 ignored_files_due_to_policy_restriction=ignored_files_due_to_policy_restriction,
+                error_count=error_count,
+                error_summary=error_summary,
                 last_indexed_at=last_indexed_at,
             )
 
@@ -163,7 +185,9 @@ class AnamnesisIndex:
                     last_index_status,
                     drift_detected,
                     parser_mode,
-                    ignored_files_due_to_policy_restriction
+                    ignored_files_due_to_policy_restriction,
+                    error_count,
+                    error_summary_json
                 FROM sources
                 ORDER BY source_id
                 """
@@ -179,6 +203,8 @@ class AnamnesisIndex:
                 drift_detected=bool(row[6]),
                 parser_mode=row[7] if row[7] is not None else None,
                 ignored_files_due_to_policy_restriction=int(row[8] or 0),
+                error_count=int(row[9] or 0),
+                error_summary=self._safe_error_summary(row[10]),
             )
             for row in rows
         )
@@ -246,6 +272,21 @@ class AnamnesisIndex:
         conn = sqlite3.connect(self.path)
         conn.execute("PRAGMA secure_delete = ON")
         return conn
+
+    def _safe_error_summary(self, raw_summary: object) -> dict[str, int]:
+        if not isinstance(raw_summary, str):
+            return {}
+        try:
+            loaded = json.loads(raw_summary)
+        except json.JSONDecodeError:
+            return {}
+        if not isinstance(loaded, dict):
+            return {}
+        return {
+            str(key): int(value)
+            for key, value in loaded.items()
+            if isinstance(value, int) or (isinstance(value, str) and value.isdigit())
+        }
 
     def secure_delete_enabled(self) -> bool:
         if not self.path.exists():
@@ -340,15 +381,20 @@ class AnamnesisIndex:
         drift_detected: bool = False,
         parser_mode: str | None = None,
         ignored_files_due_to_policy_restriction: int = 0,
+        error_count: int = 0,
+        error_summary: dict[str, int] | None = None,
         last_indexed_at: str | None = None,
     ) -> None:
+        summary_json = json.dumps(error_summary or {})
         conn.execute(
             """
             INSERT OR REPLACE INTO sources (
                 source_id, source_type, display_name, path, last_indexed_at,
                 last_index_status, drift_detected, parser_mode,
-                ignored_files_due_to_policy_restriction
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ignored_files_due_to_policy_restriction,
+                error_count,
+                error_summary_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 source.source_id,
@@ -360,6 +406,8 @@ class AnamnesisIndex:
                 1 if drift_detected else 0,
                 parser_mode,
                 ignored_files_due_to_policy_restriction,
+                error_count,
+                summary_json,
             ),
         )
 
@@ -383,6 +431,14 @@ class AnamnesisIndex:
         ):
             conn.execute(
                 "ALTER TABLE sources ADD COLUMN ignored_files_due_to_policy_restriction INTEGER NOT NULL DEFAULT 0"
+            )
+        if "error_count" not in existing_columns:
+            conn.execute(
+                "ALTER TABLE sources ADD COLUMN error_count INTEGER NOT NULL DEFAULT 0"
+            )
+        if "error_summary_json" not in existing_columns:
+            conn.execute(
+                "ALTER TABLE sources ADD COLUMN error_summary_json TEXT NOT NULL DEFAULT '{}'"
             )
 
 

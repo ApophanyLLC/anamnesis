@@ -111,11 +111,23 @@ python -m anamnesis index
 python -m anamnesis status
 python -m anamnesis privacy-audit
 python -m anamnesis privacy-audit --fix-permissions
+python -m anamnesis privacy-audit --generate-report
+python -m anamnesis debug-report
 python -m anamnesis search "auth architecture decision"
 python -m anamnesis search "auth architecture decision" --verbose
 python -m anamnesis authorize "<source_id>"  # re-checks policy diffs on drift and offers legacy mode
 python -m anamnesis revoke "<source_id>"
 ```
+
+For a structured bug report without sharing local content, run:
+
+```bash
+python -m anamnesis debug-report
+```
+
+The command prints an anonymized summary with source status, parser posture, counts
+of indexed rows, and cumulative error counters that can be pasted into a GitHub issue
+or discussion.
 
 When a source policy changes, `authorize` prints a terminal diff and requires
 explicit user choice:

@@ -125,6 +125,8 @@ class SourceIndexStatus:
     drift_detected: bool
     parser_mode: str | None
     ignored_files_due_to_policy_restriction: int = 0
+    error_count: int = 0
+    error_summary: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

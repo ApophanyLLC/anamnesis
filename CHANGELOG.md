@@ -9,3 +9,6 @@
   - Keep legacy restrictions (skip newly added file types),
   - Cancel.
 - Added per-source tracking of ignored files when legacy mode is selected and surfaced it via `status` and verbose search diagnostics.
+- Added `debug-report` command and `privacy-audit --generate-report` to emit anonymized local diagnostics for user feedback without content.
+- Added source-level cumulative error counters in the index manifest (`error_count` + `error_summary`) for local issue pattern tracking.
+- Documented how to share debug reports as the project feedback loop.
