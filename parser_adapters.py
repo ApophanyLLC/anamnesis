@@ -108,6 +108,18 @@ _KNOWN_ADAPTERS: tuple[ParserAdapter, ...] = (
 )
 
 
+def adapters() -> tuple[ParserAdapter, ...]:
+    """Return the registered parser adapters."""
+
+    return _KNOWN_ADAPTERS
+
+
+def adapter_owner(owner: str) -> ParserAdapter:
+    """Resolve a parser owner id with a safe fallback."""
+
+    return get_adapter(owner)
+
+
 def _build_adapter_index() -> dict[str, ParserAdapter]:
     registry: dict[str, ParserAdapter] = {}
     for adapter in _KNOWN_ADAPTERS:
@@ -122,3 +134,14 @@ def get_adapter(parser_owner: str) -> ParserAdapter:
     """Resolve an adapter for a parser owner with a safe fallback."""
 
     return _ADAPTERS.get(parser_owner) or _ADAPTERS["unassigned"]
+
+
+__all__ = [
+    "ParseFn",
+    "ParserAdapter",
+    "adapters",
+    "adapter_owner",
+    "get_adapter",
+    "parse_copilot_adapter",
+    "parse_documents_adapter",
+]

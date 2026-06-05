@@ -250,6 +250,10 @@ conservative compared with broad extension-state indexing, but VS Code storage
 schemas can drift and may still need source-specific adapters for better recall
 and fewer false positives.
 
+Adapter authors can add new vendor format support through the adapter contract in
+[`docs/parser-adapters.md`](docs/parser-adapters.md), which defines the internal
+normalized session shape and required parser owner/version behavior.
+
 Large JSON and ZIP members are still loaded as whole members before
 normalization. Very large ChatGPT exports should move to a streaming parser
 before this surface is treated as a high-volume archival importer.
