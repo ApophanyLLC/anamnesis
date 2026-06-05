@@ -309,6 +309,14 @@ def _policy_escalation_detected(old: dict[str, Any], new: dict[str, Any]) -> boo
     new_suffixes = sorted(str(value) for value in new.get("file_suffixes", ()))
     if len(set(new_suffixes) - set(old_suffixes)) > 0:
         return True
+    old_owner = str(old.get("parser_owner", ""))
+    new_owner = str(new.get("parser_owner", ""))
+    if old_owner != new_owner:
+        return True
+    old_adapter = str(old.get("parser_adapter_version", ""))
+    new_adapter = str(new.get("parser_adapter_version", ""))
+    if old_adapter != new_adapter:
+        return True
 
     boundary_keys = {
         "local_path_format",

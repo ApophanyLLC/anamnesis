@@ -172,6 +172,9 @@ explicit user choice with a safe default that cancels on Enter:
 - `[1]` / `y` accept the new policy (applies full current policy),
 - `[2]` keep legacy restrictions (indexes only previously-allowed files),
 - `[3]` / Enter / `n` cancel.
+- if the change raises consent risk (for example risk-level increase, parser
+  format change, or new file suffixes), the prompt asks for explicit typed
+  confirmation: type `accept log` to continue.
 
 For scripted runs, use:
 
