@@ -86,28 +86,33 @@ def _prompt_authorize_with_policy_review(
 
     current_snapshot = policy_snapshot_for_definition(source_definition)
     current_policy_id = policy_id_for_snapshot(current_snapshot)
-    if authorization.policy_id == current_policy_id and (
+    if (
         authorization.policy_snapshot == current_snapshot
-        or authorization.policy_mode != "legacy"
+        and authorization.policy_id == current_policy_id
     ):
         return authorization
 
     print(f"Policy update for {source.display_name}:")
-    for line in _policy_diff_lines(authorization.policy_snapshot, current_snapshot):
-        print(line)
+    policy_diff_lines = _policy_diff_lines(authorization.policy_snapshot, current_snapshot)
+    if policy_diff_lines:
+        for line in policy_diff_lines:
+            print(line)
+    else:
+        print("-   <no diff in tracked policy fields>")
     escalation = _policy_escalation_detected(authorization.policy_snapshot, current_snapshot)
     while True:
         selected = (
             input(
-                "Choose: [1] Accept new policy, [2] Keep legacy policy, "
-                "[3] Cancel [default: 3]: "
-            ).strip()
-            or "3"
+                "Proceed with policy update? [y/N] "
+                "[1]=accept, [2]=keep legacy, [3]=cancel [default: N]: "
+            )
+            .strip()
+            .lower()
         )
-        if selected == "3":
+        if selected in {"", "n", "cancel", "q", "quit", "3"}:
             print("Authorization cancelled.")
             return None
-        if selected == "1":
+        if selected in {"1", "y", "yes", "accept"}:
             if escalation:
                 confirmation = input("Type 'accept log' to continue: ").strip()
                 if confirmation != "accept log":
@@ -125,7 +130,7 @@ def _prompt_authorize_with_policy_review(
                 policy_snapshot=authorization.policy_snapshot,
                 policy_mode="legacy",
             )
-        if selected not in {"1", "2", "3"}:
+        if selected not in {"1", "2", "3", "y", "yes", "accept", "n", "cancel", "q", "quit"}:
             print("Invalid option. Use 1, 2, or 3.")
             continue
 

@@ -130,11 +130,11 @@ of indexed rows, and cumulative error counters that can be pasted into a GitHub 
 or discussion.
 
 When a source policy changes, `authorize` prints a terminal diff and requires
-explicit user choice:
+explicit user choice with a safe default that cancels on Enter:
 
-- `[1]` accept the new policy (applies full current policy),
+- `[1]` / `y` accept the new policy (applies full current policy),
 - `[2]` keep legacy restrictions (indexes only previously-allowed files),
-- `[3]` cancel.
+- `[3]` / Enter / `n` cancel.
 
 Run `anamnesis status` or `anamnesis search --verbose` to inspect policy-mode
 status and any `ignored_files_due_to_policy_restriction` counters.
