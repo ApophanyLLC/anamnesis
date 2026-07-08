@@ -23,8 +23,8 @@ Anamnesis uses an upstream-first contribution model.
 
 Unless separately agreed in writing, any contribution intentionally submitted
 for inclusion in Anamnesis is provided under the repository license and also
-includes permission for the Anamnesis maintainers to use, reproduce, modify,
-distribute, sublicense, and relicense that contribution as part of Anamnesis,
-including for commercial licensing by the maintainers.
+includes permission for Apophany LLC to use, reproduce, modify, distribute,
+sublicense, and relicense that contribution as part of Anamnesis, including
+for commercial licensing by Apophany LLC.
 
 Only submit material that you have the right to contribute.
