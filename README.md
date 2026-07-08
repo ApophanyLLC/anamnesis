@@ -53,6 +53,15 @@ session stores without reading content, records explicit user authorization for
 each source, indexes authorized sessions into a local SQLite database, and
 offers CLI search over the resulting index.
 
+## License and Warranty
+
+This repository is source-available and noncommercial, not open source.
+General use, study, and modification are allowed for noncommercial purposes.
+Commercial use requires separate permission, and public modified forks are
+expected to submit their changes upstream through the canonical repository.
+See [`LICENSE`](LICENSE) for the binding terms and [`CONTRIBUTING.md`](CONTRIBUTING.md)
+for the upstream-first contribution policy.
+
 ## Experimental Use Notice
 
 This repository is an experimental source snapshot, not a hardened archival

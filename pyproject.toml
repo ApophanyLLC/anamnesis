@@ -5,11 +5,12 @@ description = "Local-first AI session archaeology and search"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{name = "Anamnesis maintainers"}]
-license = {text = "Proprietary - All rights reserved"}
+license = {file = "LICENSE"}
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: Developers",
+    "License :: Other/Proprietary License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -29,6 +30,7 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 packages = ["anamnesis"]
 package-dir = {"anamnesis" = "."}
+license-files = ["LICENSE"]
 
 [tool.ruff]
 line-length = 88
